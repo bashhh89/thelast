@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 // Define the structure for a model based on the provided list
-interface AiModel {
+export interface AiModel {
   id: string; // e.g., 'openai', 'llama'
   name: string; // User-friendly name, e.g., 'OpenAI GPT-4o-mini'
   description?: string;

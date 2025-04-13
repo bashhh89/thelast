@@ -58,7 +58,7 @@ export function MessageItem({ message }: MessageItemProps) {
     });
   };
 
-  // Define Markdown components
+  // Define Markdown components with custom styling
   const markdownComponents = {
     pre: ({ node, children, ...props }: any) => {
       // Access the properties of the child code element directly
@@ -75,9 +75,7 @@ export function MessageItem({ message }: MessageItemProps) {
 
       return (
         <div className="relative group">
-          {/* Pass props down to the pre element */}
-          <pre {...props} className="!bg-black rounded-md p-4 pt-8 overflow-x-auto"> {/* Added top padding */} 
-            {/* Render the original children (which includes the code element) */}
+          <pre {...props} className="!bg-black rounded-md p-4 pt-8 overflow-x-auto text-sm mb-4"> {/* Added mb-4 */} 
             {children}
           </pre>
           <Button
@@ -115,12 +113,25 @@ export function MessageItem({ message }: MessageItemProps) {
         </code>
       );
     },
-    // Add custom renderers for other elements if needed (e.g., tables, links)
-    // Example for tables:
-    table: ({ node, ...props }: any) => <div className="overflow-x-auto"><table className="table-auto w-full my-2" {...props} /></div>,
+    // Existing table components (keep as they are)
+    table: ({ node, ...props }: any) => <div className="overflow-x-auto"><table className="table-auto w-full my-4 border-collapse border border-border" {...props} /></div>, // Added my-4, border styles
     thead: ({ node, ...props }: any) => <thead className="bg-muted/50" {...props} />, 
-    th: ({ node, ...props }: any) => <th className="border px-4 py-2 text-left font-bold" {...props} />, 
-    td: ({ node, ...props }: any) => <td className="border px-4 py-2 align-top" {...props} />, 
+    th: ({ node, ...props }: any) => <th className="border border-border px-4 py-2 text-left font-semibold" {...props} />, // Added font-semibold, border style
+    td: ({ node, ...props }: any) => <td className="border border-border px-4 py-2 align-top" {...props} />, 
+
+    // NEW components based on user prompt
+    p: ({ node, ...props }: any) => <p className="mb-4 leading-relaxed" {...props} />, // Added margin-bottom and line-height
+    ul: ({ node, ...props }: any) => <ul className="list-disc pl-5 mb-4" {...props} />, // Added list style, padding, margin
+    ol: ({ node, ...props }: any) => <ol className="list-decimal pl-5 mb-4" {...props} />, // Added list style, padding, margin
+    li: ({ node, ...props }: any) => <li className="mb-1" {...props} />, // Added margin-bottom for list items
+    blockquote: ({ node, ...props }: any) => <blockquote className="my-4 border-l-4 border-border pl-4 italic text-muted-foreground" {...props} />, // Added styling
+    a: ({ node, ...props }: any) => <a className="text-primary underline hover:text-primary/80" {...props} />, // Added styling
+    h1: ({ node, ...props }: any) => <h1 className="text-2xl font-bold my-4" {...props} />, 
+    h2: ({ node, ...props }: any) => <h2 className="text-xl font-semibold my-3" {...props} />, 
+    h3: ({ node, ...props }: any) => <h3 className="text-lg font-semibold my-3" {...props} />, 
+    h4: ({ node, ...props }: any) => <h4 className="text-base font-semibold my-2" {...props} />, 
+    h5: ({ node, ...props }: any) => <h5 className="text-sm font-semibold my-2" {...props} />, 
+    h6: ({ node, ...props }: any) => <h6 className="text-xs font-semibold my-2" {...props} />, 
   }
 
   // Determine content type for assistant messages
@@ -166,13 +177,10 @@ export function MessageItem({ message }: MessageItemProps) {
       )}
 
       <div className={cn(
-        // Apply prose styling only if it's markdown content
-        (isAssistant && (isImageUrl(message.content) || isAudioUrl(message.content))) 
-            ? "" 
-            : "prose dark:prose-invert prose-sm max-w-none", // Use max-w-none with prose
+        // Remove prose class as we are handling styling manually now
         "max-w-[75%] rounded-lg",
-        // Add padding unless it's an image (which might not need padding)
-        (isAssistant && isImageUrl(message.content)) ? "" : "px-4 py-2", 
+        // Add padding unless it's an image/audio
+        (isAssistant && (isImageUrl(message.content) || isAudioUrl(message.content))) ? "" : "px-4 py-2", 
         isUser
           ? "bg-primary text-primary-foreground"
           : "bg-muted"

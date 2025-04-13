@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch"
 import { Globe, BrainCircuit } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSearchStore } from '@/features/search/store/searchStore'
+import { AiModel } from '@/core/store/model-store'
 
 interface ChatInterfaceProps {
   chatSessionId: string | null;
@@ -36,12 +37,8 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
   const userName = user?.user_metadata?.full_name || user?.email || null
 
   const { selectedTextModelId, setSelectedTextModel, availableModels } = useModelStore()
-  const {
-    isWebSearchEnabled,
-    setIsWebSearchEnabled,
-  } = useSearchStore()
+  const { isWebSearchEnabled, setIsWebSearchEnabled } = useSearchStore()
 
-  // Create a ref for the ChatInputArea
   const inputAreaRef = React.useRef<ChatInputAreaRef>(null);
 
   React.useEffect(() => {
@@ -83,22 +80,9 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
     }
   }, [selectedTextModelId, setSelectedTextModel, availableModels])
 
-  // Effect to focus input when streaming stops
-  React.useEffect(() => {
-    if (!isStreaming && !isLoading) { // Also check isLoading to avoid focus on initial load
-      // Add a minimal delay to ensure rendering is complete
-      const timer = setTimeout(() => {
-        inputAreaRef.current?.focus();
-      }, 50); // 50ms delay might be more reliable
-      return () => clearTimeout(timer); // Cleanup timer on unmount or state change
-    }
-  }, [isStreaming, isLoading]);
-
-  const effectiveStandardModelId = selectedTextModelId
-
   const handleSendMessage = async (message: string) => {
-    if (!chatSessionId || !effectiveStandardModelId || !userId) {
-      setError("Cannot send message: Session, Standard Model, or User ID missing.")
+    if (!chatSessionId || !selectedTextModelId || !userId) {
+      setError("Cannot send message: Session, Selected Model, or User ID missing.")
       return
     }
 
@@ -110,7 +94,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       content: message,
       role: 'user' as const,
       metadata: { 
-        model_id: effectiveStandardModelId,
+        model_id: selectedTextModelId,
         is_web_search_enabled: isWebSearchEnabled
       }
     }
@@ -137,7 +121,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
         role: 'assistant' as const,
         inserted_at: new Date().toISOString(),
         metadata: { 
-          model: effectiveStandardModelId, 
+          model: selectedTextModelId, 
           webSearch: isWebSearchEnabled, 
         }
       };
@@ -149,8 +133,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       // Determine the model ID based on the Web Search toggle
       const useSearch = isWebSearchEnabled;
       const SEARCH_MODEL_ID = 'searchgpt'; 
-      const standardModelId = effectiveStandardModelId;
-      const modelToUse = useSearch ? SEARCH_MODEL_ID : standardModelId;
+      const modelToUse = useSearch ? SEARCH_MODEL_ID : selectedTextModelId;
 
       if (!modelToUse) {
         setError("No valid model selected for generation.");
@@ -158,6 +141,8 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
         setIsStreaming(false);
         return;
       }
+
+      console.log(`[ChatInterface] Calling generateTextPollinations with model: ${modelToUse}`);
 
       try {
         // Call the appropriate API function
@@ -180,65 +165,108 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
         const decoder = new TextDecoder();
         let accumulatedContent = "";
         let done = false;
-        console.log(`[${modelToUse}] Starting stream read loop...`); 
+        let buffer = ""; // Buffer to handle fragmented SSE messages
 
         while (!done) {
           const { value, done: readerDone } = await reader.read();
           done = readerDone;
-          if (value) {
-            const chunk = decoder.decode(value, { stream: true });
-            console.log(`[${modelToUse}] Raw chunk:`, chunk);
+           if (value) {
+            const chunk = decoder.decode(value, { stream: true }); // Decode chunk
+            console.log(`[${modelToUse}] Raw chunk received:`, chunk);
 
-            // Robustly check for SSE format
-            if (chunk.trim().startsWith('data:')) {
-                const lines = chunk.split("\n").filter(line => line.trim().startsWith("data: "));
-                for (const line of lines) {
-                    const dataStr = line.substring(6).trim();
-                    // console.log(`[${modelToUse}] SSE Data string:`, dataStr);
-                    if (dataStr === "[DONE]") {
-                        // console.log(`[${modelToUse}] Received [DONE] signal.`);
-                        done = true;
-                        break;
-                    }
-                    if (dataStr) {
-                        try {
-                            // Ensure complete JSON before parsing
-                            if (!dataStr.endsWith('}')) continue; 
-                            const data = JSON.parse(dataStr);
-                            const deltaContent = data.choices?.[0]?.delta?.content;
-                            if (deltaContent) {
-                                accumulatedContent += deltaContent;
-                                setMessages((prev) =>
-                                    prev.map((msg) =>
-                                        msg.id === initialAiMessage.id
-                                            ? { ...msg, content: accumulatedContent }
-                                            : msg
-                                    )
-                                );
-                            }
-                        } catch (e: any) {
-                            if (e instanceof SyntaxError) continue;
-                            console.error("Error parsing SSE stream data line:", line, e);
-                        }
-                    }
-                }
-            } else if (!done) { // Process as plain text only if not already done
-                // console.log(`[${modelToUse}] Processing as plain text chunk.`);
-                accumulatedContent += chunk;
-                setMessages((prev) =>
-                    prev.map((msg) =>
-                        msg.id === initialAiMessage.id
-                            ? { ...msg, content: accumulatedContent }
-                            : msg
-                    )
-                );
-            }
-          }
+            if (modelToUse === SEARCH_MODEL_ID) {
+              // Handle plain text stream directly for searchgpt
+              accumulatedContent += chunk;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === initialAiMessage.id
+                    ? { ...msg, content: accumulatedContent }
+                    : msg
+                )
+              );
+              // No buffering needed for plain text, process immediately
+              buffer = ""; // Clear buffer as it's handled
+            } else {
+              // Handle SSE stream for other models
+              buffer += chunk; // Add chunk to buffer for SSE processing
+              console.log(`[${modelToUse}] SSE Buffer:`, buffer);
+
+              // Process buffer line by line for SSE messages
+              let boundary = buffer.indexOf('\\n\\n'); // SSE messages end with \n\n
+
+              while (boundary !== -1) {
+                  const message = buffer.substring(0, boundary);
+                  buffer = buffer.substring(boundary + 2); // Remove message + \n\n
+                  boundary = buffer.indexOf('\\n\\n'); // Find next boundary
+
+                  const lines = message.split('\\n').filter(line => line.trim().startsWith("data: "));
+                  for (const line of lines) {
+                      const dataStr = line.substring(6).trim();
+                      if (dataStr === "[DONE]") {
+                          console.log(`[${modelToUse}] Received [DONE] signal.`);
+                          break; // Exit inner loop, outer loop will handle done via readerDone
+                      }
+                      if (dataStr) {
+                          try {
+                              const data = JSON.parse(dataStr);
+                              const deltaContent = data.choices?.[0]?.delta?.content;
+                              if (deltaContent) {
+                                  accumulatedContent += deltaContent;
+                                  setMessages((prev) =>
+                                      prev.map((msg) =>
+                                          msg.id === initialAiMessage.id
+                                              ? { ...msg, content: accumulatedContent }
+                                              : msg
+                                      )
+                                  );
+                              }
+                          } catch (e: any) {
+                              if (e instanceof SyntaxError) {
+                                  console.warn(`[${modelToUse}] Incomplete JSON received, continuing buffer:`, dataStr);
+                                  continue; // Continue buffering if JSON is incomplete
+                              }
+                              console.error("Error parsing SSE stream data line:", line, e);
+                          }
+                      }
+                  }
+              } // end inner while (boundary !== -1)
+            } // end else (SSE handling)
+          } // end if (value)
+        } // end while (!done)
+
+        // Ensure any final part of the buffer is processed for SSE (unlikely but possible)
+        if (buffer && modelToUse !== SEARCH_MODEL_ID) {
+             console.warn(`[${modelToUse}] Processing remaining buffer after stream end:`, buffer);
+             // Basic handling for remaining buffer - might need refinement
+             try {
+                 // Attempt to process any final complete SSE messages
+                 const lines = buffer.split('\\n').filter(line => line.trim().startsWith("data: "));
+                 for (const line of lines) {
+                     const dataStr = line.substring(6).trim();
+                     if (dataStr && dataStr !== "[DONE]") {
+                         const data = JSON.parse(dataStr);
+                         const deltaContent = data.choices?.[0]?.delta?.content;
+                         if (deltaContent) {
+                             accumulatedContent += deltaContent;
+                             setMessages((prev) =>
+                                 prev.map((msg) =>
+                                     msg.id === initialAiMessage.id
+                                         ? { ...msg, content: accumulatedContent }
+                                         : msg
+                                 )
+                             );
+                         }
+                     }
+                 }
+             } catch (e) {
+                 console.error("Error processing final SSE buffer:", buffer, e);
+             }
         }
 
         console.log(`[${modelToUse}] Stream read loop finished. Accumulated:`, accumulatedContent);
 
         // --- Database Saving Logic --- 
+        // Now that the stream is complete, set streaming to false and save the final message
         setIsStreaming(false);
         if (accumulatedContent) {
           const saveAiMsgPromise = createMessage({
@@ -251,30 +279,26 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
               webSearch: isWebSearchEnabled,
             },
           });
-          // Original: Saved user message earlier
-          // const saveUserMsgPromise = createMessage(userMessageData); 
           try {
-              // Fetch the previously saved user message promise if needed for allSettled, 
-              // or adjust logic if user message saving was moved/changed.
-              // For now, just await the AI message save.
-             const aiResult = await saveAiMsgPromise;
-             if (aiResult.error) {
-                console.error("Failed to save final AI message:", aiResult.error);
-                setError("Failed to save AI response to the database.");
-             } else if (aiResult.data) {
-                 // Update the final message state with ID from database
-                 setMessages((prev) => 
-                    prev.map((msg) =>
-                        msg.id === initialAiMessage.id ? aiResult.data! : msg
-                    )
-                 );
-             }
+            const aiResult = await saveAiMsgPromise;
+            if (aiResult.error) {
+              console.error("Failed to save final AI message:", aiResult.error);
+              setError("Failed to save AI response to the database.");
+            } else if (aiResult.data) {
+              // Update the final message state with ID from database
+              setMessages((prev) => 
+                 prev.map((msg) =>
+                     msg.id === initialAiMessage.id ? aiResult.data! : msg
+                 )
+              );
+            }
           } catch (dbError) {
-              console.error("Error saving final AI message:", dbError);
-              setError("Error saving AI response to the database.");
+             console.error("Error saving final AI message:", dbError);
+             setError("Error saving AI response to the database.");
           }
         } else {
           console.warn(`[${modelToUse}] No content accumulated, skipping final AI message save.`);
+          // Remove the placeholder AI message if nothing was received
           setMessages((prev) => prev.filter((msg) => msg.id !== initialAiMessage.id));
         }
         // --- End Database Saving Logic --- 
@@ -301,12 +325,6 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       setError(displayError)
     } finally {
       setIsSubmitting(false)
-      // Remove setIsStreaming(false) from here, let the main logic handle it
-      // setIsStreaming(false)
-      // Remove focus call from finally block
-      // setTimeout(() => {
-      //   inputAreaRef.current?.focus();
-      // }, 0); 
     }
   }
 
@@ -336,42 +354,54 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Fixed header with model selector */}
-      <div className="flex items-center justify-between p-2 border-b bg-background">
-        <div className="flex items-center gap-2">
-          <ModelSelector />
-          <div className="flex items-center gap-2">
-            <Label htmlFor="web-search" className="text-xs">Web Search</Label>
-            <Switch
-              id="web-search"
-              checked={isWebSearchEnabled}
-              onCheckedChange={setIsWebSearchEnabled}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Scrollable message area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
-          {error && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <MessageList 
-            messages={messages} 
-            isLoading={isLoading} 
-            error={error} 
+      {/* Header Area within ChatInterface */}
+      <div className="flex items-center justify-between border-b p-4 sticky top-0 bg-background z-10">
+        <div className="flex-grow mr-4">
+          <ModelSelector
+            // No props needed here, component uses store internally
           />
         </div>
+
+        {/* REMOVED Placeholder Buttons */}
+        {/* <div className="flex space-x-2 flex-shrink-0">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="icon" onClick={handleGenerateImage} disabled>
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Generate Image (Coming Soon)</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                 <Button variant="outline" size="icon" onClick={handleGenerateAudio} disabled>
+                  <Mic className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+               <TooltipContent>
+                 <p>Generate Audio (Coming Soon)</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div> */}
       </div>
 
-      {/* Fixed input area */}
-      <div className="bg-background border-t">
-        <ChatInputArea ref={inputAreaRef} onSubmit={handleSendMessage} isLoading={isSubmitting} />
+      {/* Message List Area */}
+      <div className="flex-1 overflow-y-auto p-4">
+        <MessageList messages={messages} isLoading={isLoading} error={error} />
       </div>
+
+      {/* Input Area */}
+      <ChatInputArea
+        ref={inputAreaRef}
+        onSubmit={handleSendMessage}
+        isLoading={isSubmitting}
+        isWebSearchEnabled={isWebSearchEnabled}
+        onWebSearchToggle={setIsWebSearchEnabled}
+      />
     </div>
   )
 } 

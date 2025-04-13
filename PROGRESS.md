@@ -204,3 +204,13 @@ Based on the roadmap defined in the initial plan.
 *   **UI/UX:** Designing an intuitive email client within the existing Qandu interface requires careful thought to avoid clutter. How does it relate to the chat, workspaces, etc.?
 *   **Privacy & Security:** Handling user emails requires robust security measures, encryption, and clear privacy policies. Users need to trust the platform implicitly.
 *   **Storage:** Decide whether to sync/store email content or fetch it on demand.
+
+## [Current Date - e.g., YYYY-MM-DD] - Focus Debugging & Search Response Fix
+
+- Investigated input focus issue after AI response completes.
+- Added detailed logging (`[Focus Effect]`) to the `useEffect` hook in `ChatInputArea.tsx` to trace focus logic execution.
+- Analyzed console logs provided by the user, confirming the focus logic fires correctly (`Timer fired, calling focus()`).
+- Identified issue where responses from `searchgpt` model were not appearing in the UI despite successful API calls.
+- Diagnosed the cause: `ChatInterface.tsx` was expecting SSE format for all models, but `searchgpt` returns plain text.
+- Modified the stream processing loop in `ChatInterface.tsx` (`handleSendMessage`) to conditionally handle plain text for `searchgpt` and SSE for other models.
+- Confirmed by user that the fix resolved the missing search responses.

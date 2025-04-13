@@ -140,6 +140,7 @@ export async function generateTextPollinations(
     // --- Special handling for searchgpt model --- 
     if (model === 'searchgpt') {
         console.log(`Generating text via special GET endpoint for searchgpt (Query: ${currentPrompt})`);
+        // Revert to putting the prompt in the path, matching the docs
         const endpointUrl = `/${encodeURIComponent(currentPrompt)}?model=searchgpt`;
         // Assume searchgpt always streams plain text
         const response = await callPollinationsAPI<any>(
@@ -179,8 +180,6 @@ export async function generateTextPollinations(
         messages: messages,
         stream: stream,
         ...parameters,
-        // Conditionally add web_search_enabled (original simple logic)
-        ...(isWebSearchEnabled && { web_search_enabled: true })
     };
 
     console.log("API Request Body:", JSON.stringify(requestBody));
