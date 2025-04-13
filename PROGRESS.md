@@ -66,12 +66,12 @@ Based on the roadmap defined in the initial plan.
 ## Phase 2: AI Integration & Feature Enhancement (Weeks 7-10) - COMPLETE ✅
 
 - [x] **1. Pollinations API & Model Management Setup**
-  - [x] Create API client functions placeholder (`src/core/api/pollinations.ts`)
-  - [x] Securely manage Pollinations API key (*Deferred - using direct calls for now*)
+  - [x] Created API route for text generation (`src/app/api/generate/text/route.ts`)
+  - [ ] Securely manage Pollinations API key (*Deferred - API call currently inactive*)
   - [x] Build `useModelStore` (Zustand slice) (`src/core/store/model-store.ts`)
   - [x] Create a basic model selection UI (`ModelSelector`) & integrate into Chat UI
 - [x] **2. AI Generation Integration**
-  - [x] Integrate Pollinations Text generation into Chat (*non-streaming - Functional*)
+  - [-] Integrate Pollinations Text generation into Chat (*non-streaming - Currently inactive, placeholder used due to API issues*)
   - [ ] Implement streaming responses for text generation (*deferred*)
   - [x] Add UI elements for Image & Audio generation
   - [x] Implement display components for generated images/audio
