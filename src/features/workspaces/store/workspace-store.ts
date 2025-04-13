@@ -1,8 +1,7 @@
 import { create } from 'zustand'
 import { Workspace } from "@/features/workspaces/types"
-import { fetchUserWorkspaces, createWorkspace as apiCreateWorkspace, deleteWorkspace as apiDeleteWorkspace } from "@/features/workspaces/api/workspace-service"
+import { fetchUserWorkspaces, createWorkspace as apiCreateWorkspace, deleteWorkspaceApi, updateWorkspaceApi } from "@/features/workspaces/api/workspace-service"
 import { WorkspaceCreateData } from "@/features/workspaces/types"
-import { PostgrestError } from '@supabase/supabase-js'
 
 interface WorkspaceState {
   workspaces: Workspace[];
@@ -14,6 +13,7 @@ interface WorkspaceState {
   createWorkspace: (workspaceData: WorkspaceCreateData) => Promise<Workspace | null>; // Return created workspace or null on error
   addWorkspaceToList: (workspace: Workspace) => void; // Helper to add locally
   deleteWorkspace: (workspaceId: string) => Promise<void>; // Add delete function signature
+  updateWorkspace: (workspaceId: string, name: string) => Promise<void>; // Add update signature
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -80,8 +80,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const currentSelectedId = get().selectedWorkspaceId;
     set({ isLoading: true, error: null });
     try {
-      const { error } = await apiDeleteWorkspace(workspaceId);
-      if (error) throw error;
+      const { error } = await deleteWorkspaceApi(workspaceId);
+      if (error) throw new Error(error);
       
       // Remove the deleted workspace from the list
       set((state) => ({
@@ -96,6 +96,43 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ error: err.message || "Failed to delete workspace", isLoading: false });
     }
   },
+
+  updateWorkspace: async (workspaceId: string, name: string) => {
+    const originalWorkspaces = get().workspaces;
+    const originalWorkspace = originalWorkspaces.find(ws => ws.id === workspaceId);
+    if (!originalWorkspace || originalWorkspace.name === name || name.trim() === '') return;
+
+    const trimmedName = name.trim();
+
+    // Optimistic update
+    set(state => ({
+      workspaces: state.workspaces.map(ws =>
+        ws.id === workspaceId ? { ...ws, name: trimmedName } : ws
+      ),
+      isLoading: true,
+      error: null
+    }));
+
+    try {
+      const { data, error } = await updateWorkspaceApi(workspaceId, { name: trimmedName });
+      
+      if (error) {
+        console.error("Failed to update workspace via API:", error);
+        throw new Error(error);
+      }
+      
+      console.log(`Workspace ${workspaceId} updated successfully via API.`);
+      set({ isLoading: false, error: null });
+
+    } catch (err: any) {
+       console.error("Error updating workspace in store:", err);
+       set({ 
+         workspaces: originalWorkspaces, 
+         error: err.message || "Failed to update workspace",
+         isLoading: false
+       });
+    }
+  }
 }));
 
 // TODO: Consider adding initialization logic similar to useInitializeAuthStore

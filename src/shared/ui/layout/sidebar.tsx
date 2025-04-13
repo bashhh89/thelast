@@ -24,6 +24,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu" // Import DropdownMenu components
 import { Input } from '@/components/ui/input'; // Import Input
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog" // Import Alert Dialog
+import { Checkbox } from "@/components/ui/checkbox" // Import Checkbox
+import { Project } from '@/features/projects/types'; // <-- Add Project type import
 
 interface SidebarProps {
   isOpen: boolean;
@@ -45,7 +58,8 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
     fetchWorkspaces,
     selectWorkspace,
     createWorkspace,
-    deleteWorkspace
+    deleteWorkspace,
+    updateWorkspace
   } = useWorkspaceStore();
 
   const {
@@ -56,7 +70,13 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
     createSession,
     clearSessions,
     deleteSession,
-    updateSessionTitle
+    updateSessionTitle,
+    // Get selection state and actions
+    selectedSessionIds,
+    toggleSessionSelection,
+    selectAllSessions,
+    deselectAllSessions,
+    deleteSelectedSessions
   } = useChatSessionStore();
 
   // Get project state and actions
@@ -65,12 +85,20 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
     isLoading: isProjectsLoading,
     error: projectsError,
     fetchProjects,
+    // Destructure project update/delete functions from store
+    updateProject,
+    deleteProject,
   } = useProjectStore();
 
-  // State for inline editing
+  // State for inline editing CHATS
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null); // Ref for focus
+
+  // State for inline editing PROJECTS
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState<string>('');
+  const projectInputRef = useRef<HTMLInputElement>(null); // Ref for project input focus
 
   // State for collapsible sections
   const [isWorkspacesOpen, setIsWorkspacesOpen] = useState(true);
@@ -133,6 +161,7 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
     }
   };
 
+  // --- Chat Edit Handlers ---
   const handleStartEdit = (session: ChatSession) => {
     setEditingSessionId(session.id);
     setEditText(session.title || '');
@@ -152,6 +181,8 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
     }
     const originalTitle = sessions.find(s => s.id === editingSessionId)?.title;
     if (editText.trim() !== originalTitle) {
+      console.log(`TODO: Call updateSessionTitle(${editingSessionId}, ${editText.trim()})`); // Keep log for now
+      // Uncomment the store action call
       await updateSessionTitle(editingSessionId, editText.trim());
     }
     handleCancelEdit(); // Exit editing mode
@@ -162,6 +193,83 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
       handleSaveEdit();
     } else if (event.key === 'Escape') {
       handleCancelEdit();
+    }
+  };
+
+  // --- Project Edit Handlers ---
+  const handleStartProjectEdit = (project: Project) => {
+    setEditingProjectId(project.id);
+    setEditProjectName(project.name || '');
+    // Focus the input after state updates
+    setTimeout(() => projectInputRef.current?.focus(), 0);
+  };
+
+  const handleCancelProjectEdit = () => {
+    setEditingProjectId(null);
+    setEditProjectName('');
+  };
+
+  const handleSaveProjectEdit = async () => {
+    if (!editingProjectId || !editProjectName.trim()) {
+      handleCancelProjectEdit(); // Cancel if empty or invalid state
+      return;
+    }
+    const originalName = projects.find(p => p.id === editingProjectId)?.name;
+    if (editProjectName.trim() !== originalName) {
+      console.log(`TODO: Call updateProject(${editingProjectId}, ${editProjectName.trim()})`); // Keep log for now
+      // Call the store action
+      await updateProject(editingProjectId, { name: editProjectName.trim() });
+    }
+    handleCancelProjectEdit(); // Exit editing mode
+  };
+
+  const handleProjectEditKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      handleSaveProjectEdit();
+    } else if (event.key === 'Escape') {
+      handleCancelProjectEdit();
+    }
+  };
+
+  // Determine if all current sessions are selected
+  const areAllSessionsSelected = sessions.length > 0 && selectedSessionIds.size === sessions.length;
+
+  // Handler for the master checkbox
+  const handleSelectAllToggle = (checked: boolean) => {
+    if (checked) {
+      selectAllSessions();
+    } else {
+      deselectAllSessions();
+    }
+  };
+
+  // State and handlers for the bulk delete confirmation dialog
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const confirmBulkDelete = async () => {
+      await deleteSelectedSessions();
+      setShowBulkDeleteDialog(false);
+  };
+
+  // --- Project Delete Handlers ---
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [showProjectDeleteDialog, setShowProjectDeleteDialog] = useState(false);
+
+  const handleProjectDeleteClick = (project: Project) => {
+    setDeletingProject(project);
+    setShowProjectDeleteDialog(true);
+  };
+
+  const cancelProjectDelete = () => {
+    setShowProjectDeleteDialog(false);
+    setDeletingProject(null);
+  };
+
+  const confirmProjectDelete = async () => {
+    if (deletingProject) {
+      console.log(`TODO: Call deleteProject(${deletingProject.id})`); // Keep log for now
+      // Call the store action
+      await deleteProject(deletingProject.id);
+      cancelProjectDelete(); // Close dialog
     }
   };
 
@@ -194,6 +302,7 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
                   onSelectWorkspace={selectWorkspace}
                   selectedWorkspaceId={selectedWorkspaceId}
                   onDeleteWorkspace={deleteWorkspace}
+                  onUpdateWorkspace={updateWorkspace}
                 />
                 <CreateWorkspaceDialog onCreate={handleCreateWorkspace} />
               </>
@@ -221,26 +330,79 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
                     View All / Create New
                     <FolderKanban className="ml-2 h-3 w-3" />
                   </Button>
-                  {/* Project List (Limited) */}
-                  {isProjectsLoading && <Skeleton className="h-6 w-full mt-1" />}
-                  {projectsError && <Alert variant="destructive" className="mt-1 text-xs p-2"><AlertDescription>Failed load.</AlertDescription></Alert>}
-                  {!isProjectsLoading && projects.length === 0 && !projectsError && 
-                    <p className="text-xs text-muted-foreground mt-1 italic px-2">No projects yet.</p>}
-                  <div className="mt-1 space-y-1">
-                    {projects.slice(0, 5).map(project => ( // Show first 5
-                      <Button 
-                        key={project.id} 
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start text-muted-foreground hover:text-foreground font-normal text-xs pl-4" // Indent slightly
-                        // TODO: Project click action?
-                      >
-                        <FolderKanban className="mr-2 h-4 w-4 flex-shrink-0" />
-                        <span className="truncate">{project.name}</span>
-                      </Button>
-                    ))}
-                    {projects.length > 5 && <p className="text-xs text-muted-foreground italic px-2">(...and more)</p>}
-                  </div>
+                  {/* Project List */}
+                  {isProjectsLoading && projects.length === 0 && (
+                    <>
+                      <Skeleton className="h-8 w-full" />
+                      <Skeleton className="h-8 w-full" />
+                    </>
+                  )}
+                  {!isProjectsLoading && projectsError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{projectsError.message || 'Failed to load projects.'}</AlertDescription>
+                    </Alert>
+                  )}
+                  {!isProjectsLoading && !projectsError && projects.length === 0 && (
+                    <p className="text-xs text-muted-foreground px-2">No projects yet.</p>
+                  )}
+                  {projects.map((project) => (
+                    <div
+                      key={project.id}
+                      className={cn(
+                        "group flex items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer",
+                        // Add active state styling if needed, e.g., based on current route or selected project context
+                        // currentProjectId === project.id ? "bg-accent font-semibold" : ""
+                      )}
+                      // onClick={() => {/* Handle project selection if needed */}} // Add later if needed
+                    >
+                      {editingProjectId === project.id ? (
+                        <div className="flex-grow flex items-center mr-1">
+                          <Input
+                            ref={projectInputRef}
+                            type="text"
+                            value={editProjectName}
+                            onChange={(e) => setEditProjectName(e.target.value)}
+                            onKeyDown={handleProjectEditKeyDown}
+                            onBlur={handleSaveProjectEdit} // Save on blur as well
+                            className="h-7 px-1 text-sm flex-grow" // Adjust styling as needed
+                            autoFocus
+                          />
+                          <Button variant="ghost" size="icon" className="h-6 w-6 ml-1 text-green-500 hover:text-green-600" onClick={handleSaveProjectEdit}>
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-600" onClick={handleCancelProjectEdit}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center flex-grow overflow-hidden mr-1">
+                            <FolderKanban className="h-4 w-4 mr-2 shrink-0" />
+                            <span className="truncate flex-grow" title={project.name}>
+                              {project.name}
+                            </span>
+                          </div>
+                          <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); handleStartProjectEdit(project); }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive/80" onClick={(e) => { e.stopPropagation(); handleProjectDeleteClick(project); }}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                            </AlertDialog>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {/* Add Project Button - Placeholder/Example */}
+                  {/* Consider moving project creation to a dedicated button/dialog */}
+                  {/* <Button variant="ghost" size="sm" className="w-full justify-start mt-1">
+                    <Plus className="h-4 w-4 mr-2" /> Add Project
+                  </Button> */}
                 </div>
               )}
             </div>
@@ -255,10 +417,47 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
                 {isChatsOpen ? <ChevronDown className="h-4 w-4 mr-2" /> : <ChevronRight className="h-4 w-4 mr-2" />}
                 Chats
                     </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleCreateChat()}>
-                  <MessageSquarePlus className="h-4 w-4" />
-                  <span className="sr-only">New Chat</span>
-              </Button>
+                {/* Buttons appear when section is open */} 
+                {isChatsOpen && (
+                    <div className="flex items-center gap-1">
+                        {/* Bulk Delete Button (visible when items are selected) */} 
+                        {selectedSessionIds.size > 0 && (
+                            <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+                                <AlertDialogTrigger asChild>
+                                     <Button variant="destructive" size="icon" className="h-7 w-7">
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="sr-only">Delete Selected</span>
+                                     </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete {selectedSessionIds.size} Chat Sessions?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            This action cannot be undone. All selected chat sessions and their messages will be permanently deleted.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={confirmBulkDelete} className="bg-destructive ...">Delete</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                        )}
+                        {/* Select All Checkbox */} 
+                        <Checkbox 
+                            id="select-all-chats"
+                            checked={areAllSessionsSelected}
+                            onCheckedChange={handleSelectAllToggle}
+                            disabled={sessions.length === 0} // Disable if no sessions
+                            className="ml-1 mr-1 h-4 w-4"
+                         />
+                        {/* New Chat Button */} 
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleCreateChat()} disabled={!selectedWorkspaceId || isSessionsLoading}>
+                            <MessageSquarePlus className="h-4 w-4" />
+                            <span className="sr-only">New Chat</span>
+                        </Button>
+                    </div>
+                )}
               </div>
               {isChatsOpen && (
                 <div className="space-y-1">
@@ -267,60 +466,63 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
                   {!isSessionsLoading && sessions.length === 0 && !sessionsError && 
                     <p className="text-xs text-muted-foreground italic px-2">No chats yet.</p>}
                   {sessions.map(session => (
-                    <div key={session.id} className="group relative">
-                          {editingSessionId === session.id ? (
-                        <div className="flex items-center gap-1">
-                              <Input 
-                                ref={inputRef}
-                                value={editText}
-                                onChange={(e) => setEditText(e.target.value)}
-                                onKeyDown={handleEditKeyDown}
-                            className="h-7 text-xs"
-                              />
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleSaveEdit}>
-                                <Check className="h-4 w-4" />
-                            <span className="sr-only">Save</span>
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCancelEdit}>
-                                <X className="h-4 w-4" />
-                            <span className="sr-only">Cancel</span>
-                              </Button>
-                            </div>
-                          ) : (
-                        <div className="flex items-center">
+                    <div key={session.id} className="group flex items-center pr-1 rounded-md hover:bg-accent">
+                      {/* Checkbox for individual selection */} 
+                      <Checkbox 
+                         id={`select-chat-${session.id}`}
+                         checked={selectedSessionIds.has(session.id)}
+                         onCheckedChange={() => toggleSessionSelection(session.id)}
+                         className="ml-2 mr-2 h-4 w-4"
+                      />
+                      {editingSessionId === session.id ? (
+                        // --- Edit Mode --- 
+                        <div className="flex items-center w-full py-1 flex-grow">
+                           <Input
+                              ref={inputRef}
+                              type="text"
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={handleEditKeyDown}
+                              onBlur={handleSaveEdit} // Save on blur
+                              className="h-7 px-2 py-1 text-xs flex-grow mr-1"
+                           />
+                           <Button variant="ghost" size="icon" className="h-6 w-6 text-green-500" onClick={handleSaveEdit}><Check size={14} /></Button>
+                           <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={handleCancelEdit}><X size={14} /></Button>
+                        </div>
+                      ) : (
+                        // --- Display Mode --- 
+                        <div className="flex items-center flex-grow w-full">
                           <Button
                             variant={currentSessionId === session.id ? "secondary" : "ghost"}
                             size="sm"
-                            className="flex-1 justify-start text-muted-foreground hover:text-foreground font-normal text-xs"
-                                onClick={() => router.push(`/chat/${session.id}`)}
-                              >
-                                <MessageSquareText className="mr-2 h-4 w-4 flex-shrink-0" />
-                                <span className="truncate">{session.title || 'Untitled Chat'}</span>
-                              </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <div className="h-7 w-7 opacity-0 group-hover:opacity-100">
-                                <Button variant="ghost" size="icon" className="h-7 w-7">
-                                  <ChevronDown className="h-4 w-4" />
-                                  <span className="sr-only">More options</span>
-                              </Button>
-                              </div>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuItem onClick={() => handleStartEdit(session)}>
-                                <Pencil className="mr-2 h-4 w-4" />
-                                <span>Rename</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => deleteSession(session.id)}>
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                <span>Delete</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                            className={cn(
+                              "w-full h-7 justify-start text-left font-normal text-xs truncate pl-2 py-1 flex-grow", 
+                              // Slightly adjust padding/width if needed due to checkbox
+                              currentSessionId === session.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                            )}
+                            onClick={() => router.push(`/chat/${session.id}`)}
+                          >
+                            <MessageSquareText className="mr-2 h-4 w-4 flex-shrink-0" />
+                            <span className="truncate flex-grow">{session.title || `Chat ${session.id.substring(0, 4)}...`}</span>
+                          </Button>
+                          {/* Edit and Delete Buttons - visible on hover */} 
+                          <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleStartEdit(session)}><Pencil size={14} /></Button>
+                             <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-600">
+                                    <Trash2 size={14} />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    {/* ... Single delete dialog content ... */}
+                                </AlertDialogContent>
+                             </AlertDialog>
+                          </div>
                         </div>
                       )}
-                        </div>
-                      ))}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -328,6 +530,47 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
 
         </div>
       </ScrollArea>
+
+      {/* --- Delete Confirmation Dialogs --- */}
+
+      {/* Bulk Chat Delete Dialog */}
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedSessionIds.size} Chat Sessions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. All selected chat sessions and their messages will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Project Delete Confirmation Dialog */}
+      <AlertDialog open={showProjectDeleteDialog} onOpenChange={setShowProjectDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the project
+              <span className="font-semibold"> {deletingProject?.name}</span> and remove its association
+              from any chat sessions.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelProjectDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmProjectDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </aside>
   );
 }; 

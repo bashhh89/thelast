@@ -41,8 +41,60 @@ export const createChatSession = async (sessionData: ChatSessionCreateData): Pro
   return { data, error };
 };
 
-// Function to delete a chat session
-export const deleteChatSession = async (sessionId: string): Promise<{ error: PostgrestError | null }> => {
+// --- API Route Callers for Sessions ---
+
+export const updateSessionApi = async (
+  sessionId: string, 
+  updates: { title: string } // API expects title
+): Promise<{ data: { id: string } | null; error: string | null }> => {
+  try {
+    const response = await fetch(`/api/chat/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    });
+
+    const responseData = await response.json();
+
+    if (!response.ok) {
+      console.error("API Error updating chat session:", response.status, responseData);
+      throw new Error(responseData.error || `Failed to update session (status: ${response.status})`);
+    }
+
+    // API route returns { message: '...', id: '...' }
+    return { data: { id: responseData.id }, error: null }; 
+
+  } catch (err: any) {
+    console.error("Caught error during session API update call:", err);
+    return { data: null, error: err.message || 'An unexpected error occurred during session update.' };
+  }
+}
+
+export const deleteSessionApi = async (sessionId: string): Promise<{ error: string | null }> => {
+  try {
+    const response = await fetch(`/api/chat/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("API Error deleting chat session:", response.status, errorData);
+      throw new Error(errorData.error || `Failed to delete session (status: ${response.status})`);
+    }
+    return { error: null };
+
+  } catch (err: any) {
+    console.error("Caught error during session API deletion call:", err);
+    return { error: err.message || 'An unexpected error occurred during session deletion.' }; 
+  }
+}
+
+// --- Direct Supabase Functions (Renamed) ---
+
+// Original deleteChatSession function
+export const deleteChatSessionDirect = async (sessionId: string): Promise<{ error: PostgrestError | null }> => {
   try {
     const { error } = await supabase
       .from('chat_sessions')
@@ -60,8 +112,8 @@ export const deleteChatSession = async (sessionId: string): Promise<{ error: Pos
   }
 };
 
-// Function to update a chat session (e.g., rename)
-export const updateChatSession = async (sessionId: string, updates: { title?: string }): Promise<{ data: ChatSession | null; error: PostgrestError | null }> => {
+// Original updateChatSession function
+export const updateChatSessionDirect = async (sessionId: string, updates: { title?: string }): Promise<{ data: ChatSession | null; error: PostgrestError | null }> => {
   try {
     const { data, error } = await supabase
       .from('chat_sessions')

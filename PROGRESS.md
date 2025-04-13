@@ -2,6 +2,10 @@
 
 Based on the roadmap defined in the initial plan.
 
+## Guiding Principle
+
+**Synergy over Silos:** Focus on features that integrate intelligently and synergistically, creating a cohesive and powerful workflow, rather than just adding standalone cool features.
+
 ## Phase 0: Foundation & Setup (Weeks 1-2) - COMPLETE ✅
 
 - [x] **1. Project Initialization**
@@ -121,3 +125,82 @@ Based on the roadmap defined in the initial plan.
 - [ ] **Multi-modal Input/Output:** Allow users to combine text, images, and potentially audio within a single prompt for more complex AI interactions.
 - [ ] **AI Meeting Assistant:** Integrate with calendar services to have AI join meetings, take notes, generate summaries, and identify action items.
 - [ ] **Personal Prompt Library:** Allow users to save, organize, and reuse their favorite prompts or prompt chains.
+
+# Qandu Project Progress & Roadmap
+
+## Core Features Implemented
+- User Authentication (Supabase Auth)
+- Workspaces (CRUD)
+- Projects (CRUD)
+- Chat Sessions (CRUD, basic linking to workspaces/projects)
+- Basic Chat Interface (Messages, Input)
+- Model Selection UI (Basic)
+- Web Search Toggle (Switches to 'searchgpt' model)
+- Git Repository Setup on GitHub
+
+## Current Issues & Next Steps
+- [ ] **Chat Interface Polish (Circle Back):**
+  - [ ] Fix input auto-focus after AI response.
+  - [ ] Investigate potential minor formatting differences between models.
+- [x] **Implement Rename/Delete Functionality:**
+  - [x] Add UI/Logic for renaming/deleting Chats in sidebar.
+  - [x] Add UI/Logic for renaming/deleting Workspaces in sidebar.
+  - [x] Add UI/Logic for renaming/deleting Projects in sidebar.
+  - [x] Create corresponding API endpoints and DB logic.
+- [x] **Finalize RLS Policies:** Test and refine Row Level Security policies.
+- [ ] **UI/UX Polish:** Address general layout inconsistencies, loading states, error handling.
+- [ ] **Implement Workspace Memberships:** Add invites, roles, and proper sharing logic.
+- [ ] **Email Hub Feature:** Implement the detailed spec below.
+
+## Planned Features / Roadmap
+
+### Feature: AI Personas / Agents
+**Goal:** Allow users to create, manage, and use custom AI personas with specific instructions and potentially knowledge bases.
+**Key Capabilities:**
+  - [x] Define Persona database schema (`personas` table).
+  - [x] Basic RLS policies for Personas.
+  - [x] Basic Persona management UI (`/personas` page, list, create dialog placeholder).
+  - [x] Basic API/Service/Store structure for Personas.
+  - [ ] Implement full Persona CRUD (Create, Update, Delete) logic.
+  - [ ] Integrate Persona selection into Chat Interface.
+  - [ ] Implement Knowledge Base connection (Future).
+  - [ ] Generate embeddable chat widget (Future).
+  - [ ] Link chat initiation to Kanban card creation (Future).
+
+### Feature: AI-Powered Email Hub within Qandu
+
+**Goal:** Allow users to connect their existing email accounts (Gmail, Outlook, etc.) to Qandu, manage emails directly within the platform, and leverage AI for various email-related tasks.
+
+**Key Capabilities:**
+
+*   **Unified Inbox:**
+    *   Connect multiple email accounts.
+    *   View emails from all connected accounts in a single, integrated inbox within Qandu.
+    *   Standard email client features: Read, Compose, Reply, Forward, Archive, Delete, Mark as Read/Unread, Folders/Labels.
+*   **AI Email Summarization:**
+    *   Get concise AI-generated summaries of long emails or entire threads with one click.
+    *   Extract key points and action items automatically.
+*   **AI Draft Assistance:**
+    *   Draft email replies based on simple instructions (e.g., "Draft a polite refusal," "Write a follow-up asking for clarification").
+    *   Generate email outlines based on bullet points.
+    *   Improve email tone, clarity, and grammar using AI suggestions.
+*   **AI Email Triage & Prioritization:**
+    *   AI automatically categorizes incoming emails (e.g., Urgent, Requires Action, Information, Spam).
+    *   AI suggests prioritization based on sender, keywords, or user-defined rules.
+    *   "Focus Inbox" mode showing only AI-identified important emails.
+*   **Email-to-Task/Project Integration:**
+    *   Convert emails or specific text within emails directly into tasks within a Qandu project or Kanban board.
+    *   Link email threads to relevant projects or workspaces for context.
+    *   AI suggests which project an email might belong to.
+*   **Natural Language Email Search:**
+    *   Search through emails using natural language queries (e.g., "find the email from John about the Q3 budget last month").
+*   **Automated Follow-ups (Advanced):**
+    *   AI suggests or even drafts follow-up emails if no reply is received after a certain period.
+
+**Implementation Considerations:**
+
+*   **Authentication:** Requires secure OAuth 2.0 integration with email providers (Google, Microsoft) to get user permission to access their mailboxes. This is a significant security undertaking.
+*   **API Integration:** Needs integration with Gmail API, Microsoft Graph API, etc., respecting their rate limits and usage policies.
+*   **UI/UX:** Designing an intuitive email client within the existing Qandu interface requires careful thought to avoid clutter. How does it relate to the chat, workspaces, etc.?
+*   **Privacy & Security:** Handling user emails requires robust security measures, encryption, and clear privacy policies. Users need to trust the platform implicitly.
+*   **Storage:** Decide whether to sync/store email content or fetch it on demand.

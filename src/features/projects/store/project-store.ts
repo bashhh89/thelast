@@ -1,10 +1,10 @@
 import { create } from 'zustand'
-import { Project, ProjectInsert, ProjectWithWorkspace } from '../types'
+import { Project, ProjectInsert, ProjectUpdate, ProjectWithWorkspace } from '../types'
 import {
   fetchProjects as apiFetchProjects,
   createProject as apiCreateProject,
-  updateProject as apiUpdateProject,
-  deleteProject as apiDeleteProject,
+  updateProjectApi,
+  deleteProjectApi,
 } from '../api/project-service'
 
 interface ProjectState {
@@ -19,7 +19,7 @@ interface ProjectState {
   setSelectedProject: (project: Project | null) => void
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
+export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   isLoading: false,
   error: null,
@@ -62,32 +62,64 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   updateProject: async (id, updates) => {
-    set({ isLoading: true, error: null })
+    // For now, only support updating the name optimistically via API
+    const newName = updates.name?.trim();
+    if (!newName) return; // Only proceed if name is provided and not empty
+
+    const originalProjects = get().projects;
+    const originalProject = originalProjects.find(p => p.id === id);
+    if (!originalProject || originalProject.name === newName) return; // No change
+
+    // Optimistic Update
+    set(state => ({
+      projects: state.projects.map(p =>
+        p.id === id ? { ...p, name: newName } : p
+      ),
+      isLoading: true,
+      error: null
+    }));
+
     try {
-      const { data, error } = await apiUpdateProject(id, updates)
-      if (error) throw error
-      if (data) {
-        // After updating, fetch the updated list to get workspace data
-        const { data: updatedData, error: fetchError } = await apiFetchProjects(data.workspace_id)
-        if (fetchError) throw fetchError
-        set({ projects: updatedData || [], isLoading: false })
+      // Call the API service function
+      const { error } = await updateProjectApi(id, { name: newName });
+      
+      if (error) {
+        console.error("Failed to update project via API:", error);
+        throw new Error(error); // Throw error string
       }
-    } catch (error) {
-      set({ error: error as Error, isLoading: false })
+      
+      // Optimistic update successful, just clear loading/error
+      set({ isLoading: false, error: null });
+
+    } catch (err: any) {
+      console.error("Error updating project in store:", err);
+      // Revert optimistic update
+      set({ 
+        projects: originalProjects, 
+        error: err instanceof Error ? err : new Error("Failed to update project"), 
+        isLoading: false 
+      });
     }
   },
 
   deleteProject: async (id) => {
-    set({ isLoading: true, error: null })
+    set({ isLoading: true, error: null });
     try {
-      const { error } = await apiDeleteProject(id)
-      if (error) throw error
+      // Call the API service function
+      const { error } = await deleteProjectApi(id);
+      if (error) throw new Error(error); // Throw error string
+      
+      // Update state on success
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== id),
         isLoading: false,
-      }))
-    } catch (error) {
-      set({ error: error as Error, isLoading: false })
+      }));
+    } catch (err: any) {
+       console.error("Error deleting project in store:", err);
+      set({ 
+        error: err instanceof Error ? err : new Error("Failed to delete project"), 
+        isLoading: false 
+      });
     }
   },
 
