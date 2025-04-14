@@ -10,6 +10,7 @@ import { useInitializeAuthStore } from "@/features/auth/store/auth-store"; // Im
 import { Header } from "@/shared/ui/layout/header"; // Import Header
 import { Sidebar } from "@/shared/ui/layout/sidebar"; // Import Sidebar
 import { useAuthStore } from "@/features/auth/store/auth-store"; // Import auth store to conditionally render layout
+import { Toaster } from "sonner"; // Import Toaster
 
 const fontSans = FontSans({
   subsets: ["latin"],
@@ -73,6 +74,7 @@ export default function RootLayout({
             // Render children directly for non-authed routes (login, register) or during loading
             children
           )}
+          <Toaster richColors />
         </ThemeProvider>
       </body>
     </html>

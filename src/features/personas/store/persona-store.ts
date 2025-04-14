@@ -6,15 +6,20 @@ import { useWorkspaceStore } from '@/features/workspaces/store/workspace-store';
 
 interface PersonaState {
   personas: Persona[];
+  selectedPersonaId: string | null;
+  selectedPersona: Persona | null;
   isLoading: boolean;
   error: string | null;
   fetchPersonas: (workspaceId: string) => Promise<void>;
   createPersona: (personaData: Omit<PersonaInsert, 'user_id' | 'workspace_id'>) => Promise<Persona | null>;
+  selectPersona: (personaId: string | null) => void;
   // TODO: Add updatePersona, deletePersona actions later
 }
 
 export const usePersonaStore = create<PersonaState>((set, get) => ({
   personas: [],
+  selectedPersonaId: null,
+  selectedPersona: null,
   isLoading: false,
   error: null,
 
@@ -27,9 +32,10 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
     try {
       const { data, error } = await fetchPersonasApi(workspaceId);
       if (error) {
-        throw new Error(error);
+        throw new Error(error.message || 'Unknown error fetching personas');
       }
       set({ personas: data || [], isLoading: false });
+      get().selectPersona(null);
     } catch (err: any) {
       console.error("Error fetching personas in store:", err);
       set({ error: err.message || 'Failed to fetch personas', isLoading: false });
@@ -54,7 +60,7 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
       const { data: newPersona, error } = await createPersonaApi(fullPersonaData as PersonaInsert);
       
       if (error) {
-        throw new Error(error);
+        throw new Error(error.message || 'Unknown error creating persona');
       }
 
       if (newPersona) {
@@ -73,6 +79,16 @@ export const usePersonaStore = create<PersonaState>((set, get) => ({
       set({ error: err.message || "Failed to create persona", isLoading: false });
       return null;
     }
+  },
+
+  selectPersona: (personaId: string | null) => {
+    const { personas } = get();
+    const selected = personaId ? personas.find(p => p.id === personaId) || null : null;
+    set({ 
+      selectedPersonaId: personaId,
+      selectedPersona: selected 
+    });
+    console.log("[PersonaStore] Selected Persona:", selected ? selected.name : 'None');
   },
 
   // Placeholder actions - implement later

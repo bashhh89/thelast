@@ -1,6 +1,9 @@
 import React from 'react';
-import { cookies } from 'next/headers'; // Needed for server client
-import { createServerComponentClient } from "@/core/supabase/server"; // Use server client helper
+// Removed cookies import as we'll use service role client
+// import { cookies } from 'next/headers'; 
+// Removed server component client import
+// import { createServerComponentClient } from "@/core/supabase/server"; 
+import { createClient } from '@supabase/supabase-js'; // Import standard client
 import { Database } from '@/core/supabase/database.types';
 import {
   Table,
@@ -14,37 +17,73 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from 'lucide-react';
+import type { User } from '@supabase/supabase-js'; // Import User type for auth data
 
-// Combine User and Profile data for display
-type UserWithProfile = Database["public"]["Tables"]["profiles"]["Row"] & {
-   auth_user: { email?: string | null; created_at: string; last_sign_in_at?: string | null; } | null; // Include relevant auth fields
+// Define types explicitly
+type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+// Select relevant fields from Supabase User type
+type AuthUser = Pick<User, 'id' | 'email' | 'created_at' | 'last_sign_in_at'>;
+
+type UserWithProfile = Profile & {
+   auth_user: AuthUser | null; // Combine profile with auth user data
 };
 
-async function fetchUsersWithProfiles() {
-   const cookieStore = cookies();
-   const supabase = createServerComponentClient(cookieStore);
+async function fetchUsersWithProfiles(): Promise<UserWithProfile[]> {
+   // Use Service Role Key for admin access to users table
+   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-   // Fetch profiles and join with auth.users table
-   // Note: This requires access to auth.users, which might need elevated privileges or specific RLS.
-   // A safer alternative is fetching profiles and then making separate auth calls if needed,
-   // or creating a DB function/view.
-   // For simplicity, let's try a direct join assuming admin privileges allow it.
-   const { data, error } = await supabase
-    .from('profiles')
-    .select(`
-      *,
-      auth_user: users(email, created_at, last_sign_in_at) 
-    `); // This assumes a relationship named 'users' exists or can be inferred.
-        // It might need to be explicitly defined or use auth.users directly if permissions allow.
-        // If this join fails due to permissions, we need to fetch separately or use a view/function.
+   if (!supabaseUrl || !serviceRoleKey) {
+      console.error('Missing Supabase URL or Service Role Key for admin user fetching');
+      throw new Error('Server configuration error for admin access.');
+   }
 
-  if (error) {
-    console.error("Error fetching users with profiles:", error);
-    throw new Error(`Failed to fetch users: ${error.message}`); // Throw error to be caught by page
-  }
+   // Create admin client
+   const supabaseAdmin = createClient<Database>(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false }
+   });
 
-   // Explicit type assertion needed as Supabase join type inference can be tricky
-  return data as UserWithProfile[]; 
+   // 1. Fetch all profiles
+   const { data: profiles, error: profilesError } = await supabaseAdmin
+      .from('profiles')
+      .select('*');
+
+   if (profilesError) {
+      console.error("Error fetching profiles (admin):", profilesError);
+      throw new Error(`Failed to fetch profiles: ${profilesError.message}`);
+   }
+   if (!profiles) {
+       return []; // No profiles found
+   }
+
+   // 2. Fetch all authentication users (requires admin privileges)
+   // Warning: Fetching all users might be slow/resource-intensive for large user bases.
+   // Consider pagination or fetching only users corresponding to fetched profiles if needed.
+   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.listUsers();
+
+   if (authError) {
+       console.error("Error fetching auth users (admin):", authError);
+       throw new Error(`Failed to fetch authentication users: ${authError.message}`);
+   }
+   const authUsers = authData.users;
+
+   // 3. Combine data
+   const authUserMap = new Map<string, AuthUser>();
+   authUsers.forEach(user => {
+       authUserMap.set(user.id, {
+           id: user.id,
+           email: user.email,
+           created_at: user.created_at,
+           last_sign_in_at: user.last_sign_in_at,
+       });
+   });
+
+   const combinedUsers: UserWithProfile[] = profiles.map(profile => ({
+      ...profile,
+      auth_user: authUserMap.get(profile.id) || null // Find matching auth user
+   }));
+
+   return combinedUsers;
 }
 
 

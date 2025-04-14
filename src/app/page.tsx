@@ -180,7 +180,7 @@ export default function DashboardPage() { // Renamed component for clarity
                         <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
                     </Button>
                     <Button variant="outline" className="w-full justify-start" asChild>
-                        <Link href="/personas"><Bot className="mr-2 h-4 w-4" /> Create New Persona</Link> 
+                        <Link href="/(app)/personas"><Bot className="mr-2 h-4 w-4" /> Create New Persona</Link>
                     </Button>
                      {/* Link to global settings? */}
                      <Button variant="ghost" className="w-full justify-start" disabled>

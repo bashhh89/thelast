@@ -1248,7 +1248,7 @@ except Exception as e:
 
 `GET https://text.pollinations.ai/models`
 
-**Description:** Returns a list of available models for the Text Generation API, including those supporting vision, audio (STT/TTS), and specific features. Also lists available voices for TTS.
+**Description:** Returns the complete and up-to-date list of available models (currently 26) for the Text Generation API. This includes a diverse range such as OpenAI models (`openai`, `openai-large`), large models (`llama`, `mistral`), coding models (`qwen-coder`), models with vision capabilities (`phi`, `llama-vision`, `mistral`), audio capabilities (`openai-audio`, `hypnosis-tracy`), reasoning specialization (`deepseek-reasoning`), and uncensored options (`unity`, `evil`). The response also details model properties (like provider, modalities) and available voices for Text-to-Speech (e.g., `alloy`, `nova`, `shimmer` via `openai-audio`). Use this endpoint to get the definitive list for integration.
 
 **Return:** JSON list/object containing model identifiers and details (including voices).
 

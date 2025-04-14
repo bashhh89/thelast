@@ -1,7 +1,7 @@
 'use client' // Need client component for hooks and store interaction
 
 import React, { useEffect, useState, useRef } from 'react';
-import { useRouter, useParams } from 'next/navigation'; // Import navigation hooks
+import { useRouter, useParams, usePathname } from 'next/navigation'; // Import navigation hooks
 import { useWorkspaceStore } from "@/features/workspaces/store/workspace-store";
 import { useChatSessionStore } from "@/features/chat/store/chat-session-store"; // Import chat session store
 import { useProjectStore } from "@/features/projects/store/project-store"; // Import project store
@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button"; // For New Chat button
 import { Skeleton } from "@/components/ui/skeleton"; // For chat list loading
 import { Alert, AlertDescription } from "@/components/ui/alert"; // For chat list error
-import { MessageSquarePlus, MessageSquareText, FolderKanban, Plus, Trash2, Pencil, Check, X, ChevronDown, ChevronRight } from 'lucide-react'; // Icons
+import { MessageSquarePlus, MessageSquareText, FolderKanban, Plus, Trash2, Pencil, Check, X, ChevronDown, ChevronRight, LayoutDashboard, UserSquare } from 'lucide-react'; // Icons
 import { cn } from "@/lib/utils"; // Import cn for conditional classes
 import { ChatSession } from '@/features/chat/types'; // <-- Import ChatSession type
 import {
@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/alert-dialog" // Import Alert Dialog
 import { Checkbox } from "@/components/ui/checkbox" // Import Checkbox
 import { Project } from '@/features/projects/types'; // <-- Add Project type import
+import Link from 'next/link'; // <-- Import Link
 
 interface SidebarProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ interface SidebarProps {
 export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
   const router = useRouter();
   const params = useParams(); // Get current route params (like sessionId)
+  const pathname = usePathname(); // Get current pathname
   const currentSessionId = params?.sessionId as string | undefined;
 
   const { user } = useAuthStore();
@@ -287,6 +289,34 @@ export const Sidebar = ({ isOpen }: SidebarProps) => { // Accept isOpen prop
         isOpen ? "opacity-100" : "opacity-0 pointer-events-none" // Fade out content
       )}>
         <div className="flex flex-col space-y-4">
+          {/* --- Top Level Links --- */}
+          <div className="px-3 py-2 space-y-1">
+            <Link
+              href="/"
+              className={cn(
+                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                !currentSessionId && pathname === '/' // Highlight if on dashboard page
+                  ? "bg-muted text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <LayoutDashboard className="mr-3 h-4 w-4" />
+              Dashboard
+            </Link>
+            <Link
+              href="/personas"
+              className={cn(
+                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                 pathname === '/personas' // Highlight if on personas page
+                   ? "bg-muted text-primary"
+                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <UserSquare className="mr-3 h-4 w-4" />
+              Personas
+            </Link>
+          </div>
+
           {/* Workspace Section */}
           <div className="px-3">
             <Button variant="ghost" size="sm" className="w-full justify-start text-left font-semibold mb-1" onClick={() => setIsWorkspacesOpen(!isWorkspacesOpen)}>

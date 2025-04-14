@@ -12,6 +12,7 @@ interface SearchState {
   selectedInternalSearchModel: string | null; // null means standard chat model is used
   setIsWebSearchEnabled: (enabled: boolean) => void;
   setSelectedInternalSearchModel: (modelId: string | null) => void;
+  toggleWebSearch: () => void; // Add toggle function
 }
 
 export const useSearchStore = create<SearchState>((set) => ({
@@ -19,4 +20,5 @@ export const useSearchStore = create<SearchState>((set) => ({
   selectedInternalSearchModel: null, // Default to standard chat
   setIsWebSearchEnabled: (enabled) => set({ isWebSearchEnabled: enabled }),
   setSelectedInternalSearchModel: (modelId) => set({ selectedInternalSearchModel: modelId }),
+  toggleWebSearch: () => set((state) => ({ isWebSearchEnabled: !state.isWebSearchEnabled })),
 })); 

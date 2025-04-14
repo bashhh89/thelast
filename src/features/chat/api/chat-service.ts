@@ -183,4 +183,26 @@ export const createMessage = async (messageData: MessageCreateData): Promise<{ d
   return { data: newMessage, error: null }; // Return the successfully inserted message
 };
 
+/**
+ * Updates an existing message in a chat session.
+ * Primarily used to update the AI assistant's message content after streaming is complete.
+ */
+export const updateMessage = async (
+  messageId: number, // Corrected type: message ID is a number
+  updates: { content?: string; metadata?: Record<string, any>; role?: string } // Fields to update
+): Promise<{ data: ChatMessage | null; error: PostgrestError | null }> => {
+  const { data, error } = await supabase
+    .from('messages')
+    .update(updates)
+    .eq('id', messageId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error(`Error updating message ${messageId}:`, error);
+  }
+
+  return { data, error };
+};
+
 // Note: Messages are generally immutable, so update/delete functions might not be needed. 

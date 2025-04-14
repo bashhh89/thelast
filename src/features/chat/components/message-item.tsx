@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm' // Import remark-gfm
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { coldarkDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import Image from 'next/image' // Import Next Image
-import { ChatMessage } from "@/features/chat/types"
+import { ChatMessage, ImageMessageMetadata, AudioMessageMetadata } from "@/features/chat/types"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar" // Add avatar component
 import { User, Bot, ClipboardCopy, Check } from 'lucide-react' // Icons for user/assistant, ClipboardCopy, Check
@@ -22,8 +22,8 @@ interface MessageItemProps {
   // userProfile?: { full_name?: string | null; avatar_url?: string | null }; 
 }
 
-// Helper to check if content is likely an image or audio URL
-const isImageUrl = (url: string): boolean => /\.(jpeg|jpg|gif|png|webp)$/i.test(url);
+// Helper to check if content is likely an image or audio URL - Keep for audio
+// const isImageUrl = (url: string): boolean => /\.(jpeg|jpg|gif|png|webp)$/i.test(url);
 const isAudioUrl = (url: string): boolean => /\.(mp3|wav|ogg|m4a)$/i.test(url);
 
 export function MessageItem({ message }: MessageItemProps) {
@@ -134,19 +134,44 @@ export function MessageItem({ message }: MessageItemProps) {
     h6: ({ node, ...props }: any) => <h6 className="text-xs font-semibold my-2" {...props} />, 
   }
 
-  // Determine content type for assistant messages
+  // Determine content type based on metadata or content
   let contentElement: React.ReactNode;
-  if (isAssistant && isImageUrl(message.content)) {
+  const metadataType = message.metadata?.type;
+  
+  // Check for audio URL in content (fallback/older method, potentially remove later)
+  const isLegacyAudio = isAssistant && isAudioUrl(message.content);
+
+  if (metadataType === 'image') {
+    const imageMetadata = message.metadata as ImageMessageMetadata;
     contentElement = (
-       <Image 
-          src={message.content} 
-          alt="Generated Image" 
-          width={300} // Adjust size as needed
-          height={300} 
-          className="rounded-md object-cover"
-       />
+      <div className="flex flex-col items-center"> 
+        <img 
+          src={imageMetadata.imageUrl} 
+          alt={imageMetadata.prompt || "Generated Image"} 
+          className="rounded-md object-cover max-w-full h-auto max-h-96 my-2"
+        />
+        {imageMetadata.prompt && (
+            <p className="text-xs text-center text-muted-foreground mt-1 italic px-2">{imageMetadata.prompt}</p>
+        )}
+      </div>
     );
-  } else if (isAssistant && isAudioUrl(message.content)) {
+  } else if (metadataType === 'audio') {
+    const audioMetadata = message.metadata as AudioMessageMetadata;
+    // --- DEBUGGING --- Remove log for audio URL
+    // console.log('[MessageItem] Rendering audio element with URL:', audioMetadata.audioUrl);
+    // --- END DEBUGGING ---
+    contentElement = (
+      <div className="w-full my-2"> {/* Added container with margin */} 
+        <audio controls src={audioMetadata.audioUrl} className="w-full h-10"> {/* Adjusted height */} 
+          Your browser does not support the audio element.
+        </audio>
+        {audioMetadata.text && (
+            <p className="text-xs text-muted-foreground mt-1 italic px-2">TTS for: "{audioMetadata.text}"</p>
+        )}
+      </div>
+    );
+  } else if (isLegacyAudio) {
+    // Keep existing audio rendering logic based on content URL
     contentElement = (
       <audio controls src={message.content} className="w-full">
         Your browser does not support the audio element.
@@ -179,8 +204,8 @@ export function MessageItem({ message }: MessageItemProps) {
       <div className={cn(
         // Remove prose class as we are handling styling manually now
         "max-w-[75%] rounded-lg",
-        // Add padding unless it's an image/audio
-        (isAssistant && (isImageUrl(message.content) || isAudioUrl(message.content))) ? "" : "px-4 py-2", 
+        // Add padding unless it's an image/audio based on metadata
+        metadataType === 'image' || metadataType === 'audio' || isLegacyAudio ? "" : "px-4 py-2", 
         isUser
           ? "bg-primary text-primary-foreground"
           : "bg-muted"

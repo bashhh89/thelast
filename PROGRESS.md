@@ -91,6 +91,11 @@ Based on the roadmap defined in the initial plan.
   - [x] Create Admin dashboard page (`/admin/page.tsx`)
   - [x] Implement User Management UI (Basic List) (`/admin/users/page.tsx`)
   - [x] Build initial Endpoint Management UI (Read-Only) (`/admin/endpoints/page.tsx`)
+  - [x] Refactored Admin Endpoint Management UI (`/admin/endpoints/page.tsx`):
+    - [x] Standardized Pollinations AI provider handling (removed hardcoding).
+    - [x] Added model search functionality to the Add/Edit Endpoint dialog.
+    - [x] Updated `useModelStore` to fetch all models dynamically from DB.
+    - [*Note: Some TypeScript linter errors remain in `page.tsx` after refactoring.*]
 - [ ] **2. Project Management Module**
   - [x] Create Project feature module (`src/features/projects/`)
   - [x] Implement basic Project CRUD UI and connect to Supabase
