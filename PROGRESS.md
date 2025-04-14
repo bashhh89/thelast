@@ -219,3 +219,17 @@ Based on the roadmap defined in the initial plan.
 - Diagnosed the cause: `ChatInterface.tsx` was expecting SSE format for all models, but `searchgpt` returns plain text.
 - Modified the stream processing loop in `ChatInterface.tsx` (`handleSendMessage`) to conditionally handle plain text for `searchgpt` and SSE for other models.
 - Confirmed by user that the fix resolved the missing search responses.
+
+## [2024-03-20] - AI Endpoint Models Table Verification
+
+- Verified ai_endpoint_models table structure in Supabase database
+- Confirmed table has correct schema with following columns:
+  - id (uuid) - Primary key with default random UUID generator
+  - endpoint_id (uuid) - References the AI endpoints table
+  - model_id (text) - The model identifier
+  - model_name (text) - Optional display name
+  - enabled (boolean) - Default false
+  - created_at (timestamp with timezone) - Auto-set on creation
+  - updated_at (timestamp with timezone) - Auto-updates on changes
+- Table is properly configured with correct constraints and defaults
+- Verified through Supabase SQL Editor that table exists and is ready for use
