@@ -4,6 +4,12 @@ import { Readable } from 'stream'; // Import for stream checking
 import { createClient } from '@supabase/supabase-js'; // Import Supabase client
 import { Database } from '@/core/supabase/database.types'; // Import DB types
 
+// Define structure for Google Gemini generateContent request body
+interface GoogleGenerateContentRequest {
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  // Add generationConfig, safetySettings etc. later if needed
+}
+
 // Type definition for our dynamic endpoint
 type AiEndpoint = Database['public']['Tables']['ai_endpoints']['Row'];
 
@@ -45,10 +51,10 @@ const builtInPollinationsModels: string[] = [
   'mistral-roblox', 'roblox-rp', 'sur', 'llama-scaleway', 'openai-audio'
 ];
 
-// New generic helper function to call different AI endpoints
+// Refactored helper function
 async function callAiEndpoint(
-  endpoint: AiEndpoint,
-  apiKey: string, // Note: apiKey will be empty for Pollinations, handled below
+  endpoint: AiEndpoint, 
+  apiKey: string, // Pass the direct key here
   modelId: string, 
   messages: Array<{ role: string; content: string }>,
   stream: boolean = true
@@ -57,75 +63,67 @@ async function callAiEndpoint(
 
   let fetchUrl: string;
   let requestBody: Record<string, any>;
-  const headers: HeadersInit = {
+  let headers: HeadersInit = {
     'Content-Type': 'application/json',
     'Accept': stream ? 'text/event-stream' : 'application/json',
   };
-  const actualModelId = modelId;
+  const actualModelId = modelId; // Usually the same, but might differ if endpoint config overrides
 
-  switch (endpoint.type) {
-    // Group compatible providers
-    case 'openai':
-    case 'openai_compatible':
-    case 'google':
-    case 'anthropic':
-    case 'mistral':
-    case 'groq':
-    case 'custom':
-    case 'openrouter': // Add openrouter
-    case 'hypobolic': // Add hypobolic
-    case 'deepseek': // Add deepseek
-      if (!endpoint.base_url) {
-        throw new Error(`Endpoint '${endpoint.name}' (type: ${endpoint.type}) is missing Base URL.`);
-      }
-      // Assume OpenAI compatible /chat/completions path
-      // For Google, the base URL itself might point to generateContent, 
-      // but the body structure might differ - requires testing.
-      // Let's assume /chat/completions for now, may need refinement for Google.
-      let path = '/chat/completions';
-      // Google uses a different path format
-      // if (endpoint.type === 'google') {
-      //   path = `/models/${actualModelId}:generateContent`; 
-      // } 
-      // Sticking to chat/completions path based on current structure
-      
-      fetchUrl = `${endpoint.base_url.replace(/\/$/, '')}${path}`; 
-      requestBody = {
-        model: actualModelId,
-        messages: messages,
-        stream: stream,
-      };
-      // Add Auth headers 
-      if (endpoint.type === 'anthropic') {
-        headers['x-api-key'] = apiKey;
-        headers['anthropic-version'] = '2023-06-01'; 
-      } else if (endpoint.type !== 'google') { // Google uses API key in URL handled during setup
-        if (apiKey) {
-            headers['Authorization'] = `Bearer ${apiKey}`;
+  // --- Google Gemini Specific Logic --- 
+  if (endpoint.type === 'google') {
+    if (!apiKey) throw new Error('API key is required for Google endpoint.');
+    // Construct Google-specific URL and body
+    // NOTE: modelId here should be like 'gemini-1.5-pro', not 'models/gemini-1.5-pro'
+    // The route handler sending the request should ensure this.
+    const modelNameOnly = actualModelId.startsWith('models/') ? actualModelId.substring(7) : actualModelId;
+    fetchUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelNameOnly}:${stream ? 'streamGenerateContent' : 'generateContent'}?key=${apiKey}`;
+    
+    // Convert OpenAI message format to Google's format
+    const googleMessages = messages.map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : msg.role, // Map 'assistant' to 'model'
+        parts: [{ text: msg.content }]
+    }));
+
+    requestBody = { contents: googleMessages };
+    // No Authorization header for Google key-based auth
+  } 
+  // --- Pollinations Specific Logic --- 
+  else if (endpoint.type === 'pollinations') {
+    fetchUrl = 'https://text.pollinations.ai/openai'; 
+    requestBody = {
+      model: actualModelId, 
+      messages: messages,
+      stream: stream,
+      referrer: 'QanduApp'
+    };
+    // No Authorization header needed
+  } 
+  // --- OpenAI Compatible / Other Logic --- 
+  else {
+    // Assume OpenAI compatible /chat/completions path for others
+    if (!endpoint.base_url) {
+      throw new Error(`Endpoint '${endpoint.name}' (type: ${endpoint.type}) is missing Base URL.`);
+    }
+    fetchUrl = `${endpoint.base_url.replace(/\/$/, '')}/chat/completions`; 
+    requestBody = {
+      model: actualModelId,
+      messages: messages,
+      stream: stream,
+    };
+    // Add Auth headers IF apiKey exists 
+    if (apiKey) {
+        if (endpoint.type === 'anthropic') { // Special case for Anthropic headers
+            headers['x-api-key'] = apiKey;
+            headers['anthropic-version'] = '2023-06-01';
         } else {
-            // Allow custom/google to proceed without key, others might error later
-            if (endpoint.type !== 'custom') {
-              console.warn(`[callAiEndpoint] No API key provided for endpoint type ${endpoint.type}, name ${endpoint.name}.`);
-            }
+            // Default to Bearer token for others (openai, openrouter, custom, etc.)
+            headers['Authorization'] = `Bearer ${apiKey}`;
         }
-      }
-      break;
-
-    case 'pollinations': // Add specific case for Pollinations
-      // Pollinations uses a specific URL and body structure, and no Auth header
-      fetchUrl = 'https://text.pollinations.ai/openai'; // Use the known compatible endpoint
-      requestBody = {
-          model: actualModelId, // Use the specific model ID selected
-          messages: messages,
-          stream: stream,
-          referrer: 'QanduApp' // Optional: Identify your app
-      };
-      // No Authorization header needed for Pollinations
-      break;
-
-    default:
-      console.error(`[callAiEndpoint] Unsupported endpoint type: ${endpoint.type}`);
-      throw new Error(`Unsupported AI endpoint type: ${endpoint.type}`);
+    } else if (endpoint.type !== 'custom') {
+        // Throw error if key is missing for non-custom types that need it
+        console.warn(`[callAiEndpoint] API key missing for required endpoint type ${endpoint.type}, name ${endpoint.name}.`);
+        throw new Error(`API key configuration missing for endpoint '${endpoint.name}'.`);
+    }
   }
 
   console.log(`[callAiEndpoint] Making fetch request to URL: ${fetchUrl}`);
@@ -157,24 +155,20 @@ export async function POST(request: Request) {
     const { prompt, endpointId, modelId, systemPrompt, chatHistory } = validation.data;
     console.log(`[API /generate/text] Received request for endpointId '${endpointId}', modelId '${modelId}'. History length: ${chatHistory?.length ?? 0}`);
 
-    // --- Prepare messages (Now includes history) --- 
+    // --- Prepare messages (Includes history, handles system prompt) --- 
     let messagesForApi: Array<{ role: string; content: string }> = [];
-
-    // 1. Add System Prompt (if provided)
-    if (systemPrompt) {
-      messagesForApi.push({ role: 'system', content: systemPrompt });
+    // Add System Prompt (needs specific handling for Google later if needed)
+    if (systemPrompt && systemPrompt.trim() !== '') {
+        // For OpenAI compatible, add as system message
+        messagesForApi.push({ role: 'system', content: systemPrompt });
+        // Google's 'system' instruction is separate - handle in callAiEndpoint if needed
     }
-    
-    // 2. Add Chat History (if provided)
     if (chatHistory) {
-      // Ensure history roles are valid for the API
       messagesForApi = messagesForApi.concat(
           chatHistory.filter(msg => msg.role === 'user' || msg.role === 'assistant')
                      .map(msg => ({ role: msg.role, content: msg.content }))
       );
     }
-    
-    // 3. Add the current user prompt
     messagesForApi.push({ role: 'user', content: prompt });
 
     console.log(`[API /generate/text] Total messages prepared for AI: ${messagesForApi.length}`);
@@ -188,7 +182,8 @@ export async function POST(request: Request) {
     console.log(`[API /generate/text] Fetching details for endpoint configuration ${endpointId}...`);
     const { data: fetchedEndpoint, error: endpointError } = await supabaseAdmin
       .from('ai_endpoints')
-      .select('*') // Select all columns needed, including type, base_url, api_key, api_key_env_var
+      // Select all fields needed for the AiEndpoint type, even if not directly used
+      .select('id, name, type, base_url, api_key, enabled, api_key_env_var, created_at, owner_id, updated_at') 
       .eq('id', endpointId)
       .single();
 
@@ -206,37 +201,31 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Endpoint configuration '${fetchedEndpoint.name}' is currently disabled.` }, { status: 403 });
     }
 
-    // --- API Key Logic --- (Handles Pollinations having no key)
-    const apiKeyEnvVar = fetchedEndpoint.api_key_env_var;
-    let apiKey: string | undefined;
+    console.log(`[API /generate/text] Using API key directly from database for '${fetchedEndpoint.name}'.`);
     
-    if (apiKeyEnvVar) { 
-        apiKey = process.env[apiKeyEnvVar];
-        if (!apiKey) {
-           console.error(`[API /generate/text] API Key env var '${apiKeyEnvVar}' for endpoint '${fetchedEndpoint.name}' not set in environment.`);
-           return NextResponse.json({ error: `API Key configuration error for endpoint '${fetchedEndpoint.name}'.` }, { status: 500 });
-        }
-        console.log(`[API /generate/text] Using API key from env var '${apiKeyEnvVar}'.`);
-    } else if (fetchedEndpoint.api_key) {
-        // Use direct key only if it exists and it's NOT pollinations
-        if (fetchedEndpoint.type !== 'pollinations') {
-            apiKey = fetchedEndpoint.api_key;
-            console.warn(`[API /generate/text] Using direct API key from database for endpoint '${fetchedEndpoint.name}'. Consider using an environment variable.`);
-        }
-    } 
-    
-    // If no key resolved and type requires one (not Pollinations, not Google maybe?)
-    if (!apiKey && fetchedEndpoint.type !== 'pollinations' && fetchedEndpoint.type !== 'google' && fetchedEndpoint.type !== 'custom') {
-       console.error(`[API /generate/text] API Key not configured for endpoint '${fetchedEndpoint.name}' (type: ${fetchedEndpoint.type}).`);
-       return NextResponse.json({ error: `API Key configuration missing for endpoint '${fetchedEndpoint.name}'.` }, { status: 500 });
-    }
-      
     // --- Call Helper --- 
     console.log(`[API /generate/text] Calling generic endpoint helper for: ${fetchedEndpoint.name} using model ${modelId}`);
+    
+    // Ensure modelId format is correct for Google (remove 'models/' prefix)
+    const effectiveModelId = (fetchedEndpoint.type === 'google' && modelId.startsWith('models/'))
+      ? modelId.substring(7)
+      : modelId;
+
+    // Pass the fully typed object (already done)
+    const endpointForHelper: AiEndpoint = {
+      ...fetchedEndpoint,
+      // Ensure all required fields for AiEndpoint type are present
+      // Nullish coalescing might not be needed if select('*') or all fields are used
+      // api_key_env_var: fetchedEndpoint.api_key_env_var ?? '', 
+      // created_at: fetchedEndpoint.created_at ?? new Date().toISOString(), 
+      // owner_id: fetchedEndpoint.owner_id ?? '', 
+      // updated_at: fetchedEndpoint.updated_at ?? new Date().toISOString(), 
+    };
+
     aiApiCall = await callAiEndpoint(
-      fetchedEndpoint, 
-      apiKey || "", // Pass empty string if undefined (e.g., for Pollinations)
-      modelId,         
+      endpointForHelper, 
+      fetchedEndpoint.api_key || "", // Pass the direct key (or empty if missing and allowed)
+      effectiveModelId, // Pass potentially cleaned model ID
       messagesForApi,  
       true             
     );

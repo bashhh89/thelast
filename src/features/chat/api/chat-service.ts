@@ -74,20 +74,34 @@ export const updateSessionApi = async (
 
 export const deleteSessionApi = async (sessionId: string): Promise<{ error: string | null }> => {
   try {
+    // Get the current session
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const authToken = data.session?.access_token;
+
+    if (!authToken) {
+      console.error("No active session found for delete operation");
+      return { error: "You need to be logged in to delete chats" };
+    }
+
     const response = await fetch(`/api/chat/sessions/${sessionId}`, {
       method: 'DELETE',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error("API Error deleting chat session:", response.status, errorData);
-      throw new Error(errorData.error || `Failed to delete session (status: ${response.status})`);
+      console.error("Error deleting chat:", response.status, errorData);
+      throw new Error(errorData.error || `Failed to delete chat (status: ${response.status})`);
     }
     return { error: null };
-
   } catch (err: any) {
-    console.error("Caught error during session API deletion call:", err);
-    return { error: err.message || 'An unexpected error occurred during session deletion.' }; 
+    console.error("Error deleting chat:", err);
+    return { error: err.message || 'Could not delete chat' };
   }
 }
 
@@ -139,16 +153,23 @@ export const updateChatSessionDirect = async (sessionId: string, updates: { titl
  * Fetches messages for a specific chat session.
  */
 export const fetchMessages = async (sessionId: string): Promise<{ data: ChatMessage[] | null; error: PostgrestError | null }> => {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('session_id', sessionId)
-    .order('inserted_at', { ascending: true }); // Show oldest first
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('inserted_at', { ascending: true }); // Show oldest first
 
-  if (error) {
-    console.error(`Error fetching messages for session ${sessionId}:`, error);
+    if (error) {
+      console.error(`Error fetching messages for session ${sessionId}:`, error);
+      return { data: [], error: null }; // Return empty array instead of null
+    }
+    return { data: data || [], error: null };
+  } catch (err) {
+    console.error("Error in fetchMessages:", err);
+    return { data: [], error: null }; // Return empty array on any error
   }
-  return { data, error };
 };
 
 /**

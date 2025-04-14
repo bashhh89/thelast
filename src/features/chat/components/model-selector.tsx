@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useModelStore, SelectableModel } from "@/core/store/model-store"
-import { Bot, Check, ChevronsUpDown, AlertTriangle, Activity, Shapes, BrainCircuit, DatabaseZap } from 'lucide-react'
+import { Bot, Check, ChevronsUpDown, AlertTriangle, Activity, Shapes, BrainCircuit, DatabaseZap, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface ModelSelectorProps {
   disabled?: boolean;
@@ -45,6 +45,7 @@ export function ModelSelector({ disabled = false }: ModelSelectorProps) {
 
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchModels();
@@ -57,7 +58,7 @@ export function ModelSelector({ disabled = false }: ModelSelectorProps) {
         model.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    return filtered.reduce((acc, model) => {
+    const grouped = filtered.reduce((acc, model) => {
       const groupKey = getProviderDisplayName(model.providerType);
       if (!acc[groupKey]) {
         acc[groupKey] = [];
@@ -66,7 +67,27 @@ export function ModelSelector({ disabled = false }: ModelSelectorProps) {
       return acc;
     }, {} as Record<string, SelectableModel[]>);
 
+    return grouped;
+
   }, [allModels, searchTerm]);
+
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupKey)) {
+        newSet.delete(groupKey);
+      } else {
+        newSet.add(groupKey);
+      }
+      return newSet;
+    });
+  };
+
+  useEffect(() => {
+    if (searchTerm) {
+      setExpandedGroups(new Set(Object.keys(filteredAndGroupedModels)));
+    }
+  }, [searchTerm, filteredAndGroupedModels]);
 
   const sortedGroupKeys = useMemo(() => Object.keys(filteredAndGroupedModels).sort((a, b) => a.localeCompare(b)), [filteredAndGroupedModels]);
 
@@ -160,32 +181,49 @@ export function ModelSelector({ disabled = false }: ModelSelectorProps) {
             <ScrollArea className="h-auto max-h-[250px]">
               <div className="p-2">
                 {sortedGroupKeys.length > 0 ? (
-                  sortedGroupKeys.map((groupKey) => (
-                    <div key={groupKey} className="mb-2 last:mb-0">
-                      <p className="text-xs font-semibold text-muted-foreground px-2 mb-1">
-                        {groupKey}
-                      </p>
-                      {filteredAndGroupedModels[groupKey].map((model: SelectableModel) => (
-                        <Button
-                          key={`${model.endpointId}-${model.id}`}
-                          variant="ghost"
-                          className="w-full justify-start h-auto py-1.5 px-2 text-xs"
-                          onClick={() => handleSelectModel(model)}
-                          title={`${model.name} (${getProviderDisplayName(model.providerType)})`}
+                  sortedGroupKeys.map((groupKey) => {
+                    const isExpanded = expandedGroups.has(groupKey);
+                    return (
+                      <div key={groupKey} className="mb-1 last:mb-0">
+                        <button
+                          type="button"
+                          className="flex items-center w-full text-left text-sm font-semibold text-muted-foreground bg-muted/60 px-2 py-1 mb-1 rounded-sm hover:bg-muted transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                          onClick={() => toggleGroup(groupKey)}
+                          aria-expanded={isExpanded}
                         >
-                          <div className="flex items-center w-full">
-                            {getModelProviderIcon(model.providerType)}
-                            <div className="flex flex-col items-start flex-grow truncate mr-2">
-                              <span className="font-medium truncate">{model.name}</span>
-                            </div>
-                            {selectedModel?.id === model.id && selectedModel?.endpointId === model.endpointId && 
-                              <Check className="ml-auto h-4 w-4 flex-shrink-0" />
-                            }
+                          {isExpanded ? (
+                            <ChevronDown size={14} className="mr-1.5 flex-shrink-0" />
+                          ) : (
+                            <ChevronRight size={14} className="mr-1.5 flex-shrink-0" />
+                          )}
+                          {groupKey} 
+                        </button>
+                        {isExpanded && (
+                          <div className="pl-2 border-l-2 border-yellow-400 ml-1">
+                            {filteredAndGroupedModels[groupKey].map((model: SelectableModel) => (
+                              <Button
+                                key={`${model.endpointId}-${model.id}`}
+                                variant="ghost"
+                                className="w-full justify-start h-auto py-1.5 px-2 text-xs"
+                                onClick={() => handleSelectModel(model)}
+                                title={`${model.name} (${getProviderDisplayName(model.providerType)})`}
+                              >
+                                <div className="flex items-center w-full">
+                                  {getModelProviderIcon(model.providerType)}
+                                  <div className="flex flex-col items-start flex-grow truncate mr-2">
+                                    <span className="font-medium truncate">{model.name}</span>
+                                  </div>
+                                  {selectedModel?.id === model.id && selectedModel?.endpointId === model.endpointId && 
+                                    <Check className="ml-auto h-4 w-4 flex-shrink-0" />
+                                  }
+                                </div>
+                              </Button>
+                            ))}
                           </div>
-                        </Button>
-                      ))}
-                    </div>
-                  ))
+                        )}
+                      </div>
+                    )
+                  })
                 ) : (
                    <p className="text-xs text-muted-foreground px-2">No models found.</p>
                 )}

@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand'
+import { create } from 'zustand'
 import { Database } from "@/core/supabase/database.types"; // Import generated types
 import { ChatSession } from "@/features/chat/types"
 import { 

@@ -55,6 +55,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
 
   const inputAreaRef = React.useRef<ChatInputAreaRef>(null);
 
+  // Load messages from local storage when component mounts
   React.useEffect(() => {
     if (!chatSessionId) {
       setMessages([])
@@ -67,20 +68,48 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       setIsLoading(true)
       setError(null)
       try {
-        const { data, error: fetchError } = await fetchMessages(chatSessionId)
-        if (fetchError) throw fetchError
-        setMessages(data || [])
+        // First check localStorage for cached messages
+        const cachedMessages = localStorage.getItem(`chat_messages_${chatSessionId}`)
+        if (cachedMessages) {
+          console.log("Loading messages from localStorage for session:", chatSessionId)
+          setMessages(JSON.parse(cachedMessages))
+          setIsLoading(false)
+          return
+        }
+        
+        // If no cached messages, try to fetch from API
+        const { data, error: fetchError } = await fetchMessages(chatSessionId).catch(err => {
+          console.log("Error caught in fetch:", err);
+          return { data: null, error: err };
+        });
+        
+        if (fetchError) {
+          console.warn("Error loading messages - continuing with empty list:", fetchError);
+          setMessages([]);
+        } else {
+          const messagesData = data || [];
+          setMessages(messagesData);
+          // Cache in localStorage
+          localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messagesData))
+        }
       } catch (err: any) {
-        console.error("Error loading messages:", err)
-        setError(err.message || "Failed to load messages.")
-        setMessages([])
+        console.error("Error loading messages:", err);
+        // Don't set an error, just use an empty message list
+        setMessages([]);
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
     }
 
-    loadMessages()
+    loadMessages();
   }, [chatSessionId])
+
+  // Save messages to localStorage when they change
+  React.useEffect(() => {
+    if (chatSessionId && messages.length > 0) {
+      localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messages))
+    }
+  }, [messages, chatSessionId])
 
   React.useEffect(() => {
     const { allModels: currentModels, selectedModel: currentSelection } = useModelStore.getState();
@@ -100,15 +129,15 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
     const currentModel = selectedModel;
 
     let initialAiMessage: ChatMessage | null = null; 
-    let dbAiMessageId: number | null = null;
     const userMessageId = Date.now();
 
-    const userMessageData = {
+    const userMessageData: ChatMessage = {
       id: userMessageId,
       session_id: chatSessionId,
       user_id: userId,
       content: message,
       role: 'user' as const,
+      inserted_at: new Date().toISOString(),
       metadata: { 
         model_id: currentModel.id,
         model_name: currentModel.name
@@ -120,10 +149,6 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       setIsStreaming(true);
       setError(null);
       
-      const userMessageWithTimestamp = {
-        ...userMessageData,
-        inserted_at: new Date().toISOString()
-      };
       initialAiMessage = {
         id: Date.now() + 1,
         session_id: chatSessionId,
@@ -136,20 +161,15 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
             model_name: currentModel.name 
         }
       };
-      setMessages(prev => [...prev, userMessageWithTimestamp, initialAiMessage!]);
+      
+      // Add messages to UI immediately and save to localStorage
+      const updatedMessages = [...messages, userMessageData, initialAiMessage];
+      setMessages(updatedMessages);
+      localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(updatedMessages));
+      
       const tempAiMessageId = initialAiMessage.id;
 
-      const saveUserMsgPromise = createMessage(userMessageData);
-      const saveAiPlaceholderPromise = createMessage({
-        session_id: initialAiMessage.session_id,
-        user_id: initialAiMessage.user_id,
-        content: "",
-        role: initialAiMessage.role,
-        metadata: initialAiMessage.metadata,
-      });
-
-      saveUserMsgPromise.catch(err => console.error("Background error saving user message:", err));
-      saveAiPlaceholderPromise.catch(err => console.error("Background error saving AI placeholder:", err));
+      // No database operations - just UI and localStorage
 
       const fetchUrl = '/api/generate/text';
       const fetchOptions: RequestInit = {
@@ -174,121 +194,121 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
           historyLength: messages.filter(msg => msg.role === 'user' || msg.role === 'assistant').length
       });
 
-      const response = await fetch(fetchUrl, fetchOptions);
+      let aiContent = "";
+      let toolArgs = "";
 
-      if (!response.ok) {
-        let errorPayload: any;
-        try { errorPayload = await response.json(); } catch { /* ignore */ }
-        const errorMsg = errorPayload?.error || `Backend API failed with status ${response.status}`;
-        console.error("Error from backend API route:", response.status, errorPayload);
-        throw new Error(errorMsg);
-      }
-      if (!response.body) throw new Error("Received empty response body from backend API");
+      try {
+        const response = await fetch(fetchUrl, fetchOptions);
 
-      let accumulatedContent = ""; 
-      let accumulatedToolArgs = "";
-      let buffer = "";
-      let done = false;
-      const stream = response.body;
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
+        if (!response.ok) {
+          let errorPayload: any;
+          try { errorPayload = await response.json(); } catch { /* ignore */ }
+          const errorMsg = errorPayload?.error || `Backend API failed with status ${response.status}`;
+          console.error("Error from backend API route:", response.status, errorPayload);
+          throw new Error(errorMsg);
+        }
+        if (!response.body) throw new Error("Received empty response body from backend API");
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
-          let messageEndIndex;
-          while ((messageEndIndex = buffer.indexOf('\n\n')) !== -1) {
-            const messageText = buffer.substring(0, messageEndIndex);
-            buffer = buffer.substring(messageEndIndex + 2);
-            const lines = messageText.split('\n');
-            for (const line of lines) {
-              if (line.startsWith('data:')) {
-                const dataStr = line.substring(5).trim();
-                if (dataStr === "[DONE]") {
-                  console.log(`[${currentModel.name}] Received [DONE] marker.`);
-                  done = true;
-                  break;
-                }
-                if (dataStr) {
-                  if (dataStr.startsWith('{') && dataStr.endsWith('}')) {
-                    try {
-                      const parsedData = JSON.parse(dataStr);
-                      const deltaContent = parsedData.choices?.[0]?.delta?.content;
-                      if (typeof deltaContent === 'string' && deltaContent.length > 0) {
-                        accumulatedContent += deltaContent;
-                      } else {
-                        const deltaToolCalls = parsedData.choices?.[0]?.delta?.tool_calls;
-                        if (deltaToolCalls && deltaToolCalls.length > 0 && deltaToolCalls[0]?.function?.arguments) {
-                           const argsChunk = deltaToolCalls[0].function.arguments;
-                           if (typeof argsChunk === 'string') {
-                               accumulatedToolArgs += argsChunk;
-                           }
+        let buffer = "";
+        let done = false;
+        const stream = response.body;
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            let messageEndIndex;
+            while ((messageEndIndex = buffer.indexOf('\n\n')) !== -1) {
+              const messageText = buffer.substring(0, messageEndIndex);
+              buffer = buffer.substring(messageEndIndex + 2);
+              const lines = messageText.split('\n');
+              for (const line of lines) {
+                if (line.startsWith('data:')) {
+                  const dataStr = line.substring(5).trim();
+                  if (dataStr === "[DONE]") {
+                    console.log(`[${currentModel.name}] Received [DONE] marker.`);
+                    done = true;
+                    break;
+                  }
+                  if (dataStr) {
+                    if (dataStr.startsWith('{') && dataStr.endsWith('}')) {
+                      try {
+                        const parsedData = JSON.parse(dataStr);
+                        const deltaContent = parsedData.choices?.[0]?.delta?.content;
+                        if (typeof deltaContent === 'string' && deltaContent.length > 0) {
+                          aiContent += deltaContent;
+                        } else {
+                          const deltaToolCalls = parsedData.choices?.[0]?.delta?.tool_calls;
+                          if (deltaToolCalls && deltaToolCalls.length > 0 && deltaToolCalls[0]?.function?.arguments) {
+                             const argsChunk = deltaToolCalls[0].function.arguments;
+                             if (typeof argsChunk === 'string') {
+                                 toolArgs += argsChunk;
+                             }
+                          }
                         }
+                      } catch (e) {
+                        console.warn(`[${currentModel.name}] Failed to parse JSON chunk:`, dataStr, e);
                       }
-                    } catch (e) {
-                      console.warn(`[${currentModel.name}] Failed to parse JSON chunk:`, dataStr, e);
+                    } else {
+                       console.warn(`[${currentModel.name}] Received non-JSON, non-[DONE] data line:`, dataStr);
                     }
-                  } else {
-                     console.warn(`[${currentModel.name}] Received non-JSON, non-[DONE] data line:`, dataStr);
                   }
                 }
               }
+              if (done) break;
             }
-            if (done) break;
-          }
 
-          if (accumulatedContent) {
-             setMessages(prev => prev.map(msg => 
-               msg.id === tempAiMessageId ? { ...msg, content: accumulatedContent } : msg
-             ));
+            if (aiContent) {
+               setMessages(prev => prev.map(msg => 
+                 msg.id === tempAiMessageId ? { ...msg, content: aiContent } : msg
+               ));
+            }
           }
         }
+        console.log(`[${currentModel.name}] Stream processing finished.`);
+      } catch (apiError: any) {
+        console.error("Error with API call:", apiError);
+        // Just update the message with an error
+        setMessages(prev => prev.map(msg => 
+          msg.id === initialAiMessage!.id 
+            ? { ...msg, content: `Sorry, I couldn't generate a response. Error: ${apiError.message || "Unknown error"}`, metadata: { ...(msg.metadata || {}), error: true } } 
+            : msg
+        ));
       }
-      console.log(`[${currentModel.name}] Stream processing finished.`);
-
-      if (accumulatedToolArgs) {
-         console.log(`[${currentModel.name}] FINAL accumulated tool arguments string:`, accumulatedToolArgs);
-         try {
-             const finalArgs = JSON.parse(accumulatedToolArgs);
-             console.log(`[${currentModel.name}] Parsed final tool arguments object:`, finalArgs);
-             console.log(`[${currentModel.name}] Tool arguments were accumulated but no specific handling implemented.`);
-         } catch(parseError) {
-             console.error(`[${currentModel.name}] Failed to parse final accumulated tool arguments:`, parseError, accumulatedToolArgs);
-         }
-      }
-
-      if (accumulatedContent) {
-           setMessages(prev =>
-                  prev.map((msg) =>
-                    msg.id === tempAiMessageId
-                      ? { ...msg, content: accumulatedContent }
-                      : msg
-                  )
-                );
-      }
-
-      const finalContent = accumulatedContent;
-      const finalDbAiMessage = await saveAiPlaceholderPromise;
-      if (finalDbAiMessage?.data?.id) {
-         dbAiMessageId = finalDbAiMessage.data.id;
-         console.log(`Updating final AI message in DB (ID: ${dbAiMessageId}) for model ${currentModel.name}`);
-         if (dbAiMessageId !== null) {
-           await updateMessage(dbAiMessageId, { content: finalContent });
-           setMessages(prev => prev.map(msg => 
-              msg.id === tempAiMessageId ? { ...msg, content: finalContent, id: dbAiMessageId! } : msg
-           ));
-          } else {
-            console.error("DB Message ID became null unexpectedly before update.");
-            setError("Error preparing to save final AI response.");
+      
+      if (toolArgs) {
+          console.log(`[${currentModel.name}] FINAL accumulated tool arguments string:`, toolArgs);
+          
+          try {
+              // Parse the JSON arguments
+              const toolArgsData = JSON.parse(toolArgs);
+              console.log(`[${currentModel.name}] Parsed tool arguments:`, toolArgsData);
+              
+              // Handle the tool calls here as needed
+          } catch (e) {
+              console.error(`[${currentModel.name}] Failed to parse tool arguments:`, e);
           }
-        } else {
-          console.error("Failed to get DB ID for AI placeholder message, cannot update final content.", finalDbAiMessage?.error);
-          setError("Error saving final AI response.");
       }
 
+      // Update localStorage with updated AI message content
+      if (aiContent && initialAiMessage) {
+          try {
+              // Update the AI message with its content
+              const finalMessages = messages.map(msg => 
+                  msg.id === tempAiMessageId 
+                      ? { ...msg, content: aiContent } 
+                      : msg
+              );
+              localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(finalMessages));
+              console.log(`[${currentModel.name}] Updated AI message in localStorage`);
+          } catch (err) {
+              console.warn(`[${currentModel.name}] Failed to update AI message in localStorage:`, err);
+          }
+      }
     } catch (error: any) {
       console.error("Error during message send/stream:", error);
       setError(error.message || "Failed to get response from AI");
@@ -346,8 +366,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
           ref={inputAreaRef}
           onSubmit={handleSendMessage} 
           isLoading={isSubmitting || isStreaming} 
-          onGenerateImage={handleGenerateImage} 
-          onGenerateAudio={handleGenerateAudio} 
+          onGenerateAudio={handleGenerateAudio}
         />
       </div>
     </div>

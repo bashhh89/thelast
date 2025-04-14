@@ -27,6 +27,21 @@ interface OpenAIModel {
     // other potential fields are ignored for now
 }
 
+// Define structure for Google's /v1beta/models response
+// Based on https://ai.google.dev/api/rest/v1beta/models/list
+interface GoogleModel {
+    name: string; // e.g., "models/gemini-1.5-pro-latest"
+    version: string;
+    displayName: string;
+    description: string;
+    // We primarily need 'name'
+}
+
+interface GoogleModelsListResponse {
+    models: GoogleModel[];
+    nextPageToken?: string;
+}
+
 interface OpenAIModelsListResponse {
     object: string;
     data: OpenAIModel[];
@@ -51,7 +66,7 @@ export async function POST(
     console.log(`[API POST /admin/endpoints/${endpointId}/models] Fetching endpoint details...`);
     const { data: endpoint, error: fetchError } = await supabaseAdmin
       .from('ai_endpoints')
-      .select('id, type, base_url, api_key_env_var')
+      .select('id, name, type, base_url, api_key')
       .eq('id', endpointId)
       .single();
 
@@ -64,18 +79,14 @@ export async function POST(
     // 2. Check Endpoint Type and Fetch Models
     let fetchedModels: { model_id: string; model_name?: string }[] = [];
 
-    if (endpoint.type === 'openai_compatible') {
+    if (endpoint.type === 'openai_compatible' || endpoint.type === 'openrouter') {
       if (!endpoint.base_url) {
-          return NextResponse.json({ error: 'Missing base_url for openai_compatible endpoint' }, { status: 400 });
+          return NextResponse.json({ error: `Missing base_url for ${endpoint.type} endpoint` }, { status: 400 });
       }
-      if (!endpoint.api_key_env_var) {
-           return NextResponse.json({ error: 'Missing api_key_env_var for endpoint' }, { status: 400 });
-      }
-
-      const apiKey = process.env[endpoint.api_key_env_var];
+      const apiKey = endpoint.api_key;
       if (!apiKey) {
-          console.error(`[API POST /admin/endpoints/${endpointId}/models] API key environment variable "${endpoint.api_key_env_var}" not set.`);
-          return NextResponse.json({ error: `Server configuration error: API key for ${endpoint.api_key_env_var} not found.` }, { status: 500 });
+          console.error(`[API POST /admin/endpoints/${endpointId}/models] API key is missing in database for ${endpoint.type} endpoint.`);
+          return NextResponse.json({ error: `API key not configured for endpoint ${endpoint.name}.` }, { status: 500 });
       }
 
       // Construct the models URL (usually /v1/models)
@@ -137,20 +148,109 @@ export async function POST(
           // Map the response to our desired format
           fetchedModels = modelsResponse.data.map(model => ({
               model_id: model.id,
-              // Use model.id as name if no specific name field exists in standard response
               model_name: model.id
           }));
-          console.log(`[API POST /admin/endpoints/${endpointId}/models] Fetched ${fetchedModels.length} models.`);
+          // --- Add Detailed Logging ---
+          console.log(`[API POST /admin/endpoints/${endpointId}/models] Raw OpenAI-compatible response data:`, JSON.stringify(modelsResponse, null, 2)); // Log raw response
+          console.log(`[API POST /admin/endpoints/${endpointId}/models] Parsed ${fetchedModels.length} models (OpenAI-compatible):`, JSON.stringify(fetchedModels));
+          // --- End Detailed Logging ---
 
       } catch (fetchModelsError: any) {
            console.error(`[API POST /admin/endpoints/${endpointId}/models] Error during model fetch:`, fetchModelsError);
            return NextResponse.json({ error: `Failed to communicate with the endpoint: ${fetchModelsError.message}` }, { status: 502 }); // 502 Bad Gateway might be appropriate
       }
 
+    } else if (endpoint.type === 'google') {
+      // --- Google AI Model Fetching Logic --- 
+      const apiKey = endpoint.api_key;
+      if (!apiKey) {
+          console.error(`[API POST /admin/endpoints/${endpointId}/models] API key is missing in database for Google endpoint.`);
+          return NextResponse.json({ error: `API key not configured for endpoint ${endpoint.name}.` }, { status: 500 });
+      }
+
+      let allGoogleModels: GoogleModel[] = [];
+      let nextPageToken: string | undefined = undefined;
+      let page = 1;
+      const MAX_PAGES = 5; // Safety break to prevent infinite loops
+
+      console.log(`[API POST /admin/endpoints/${endpointId}/models] Fetching Google models (page 1)...`);
+
+      do {
+        // Construct URL with pagination token if available
+        let modelsUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+        if (nextPageToken) {
+          modelsUrl += `&pageToken=${nextPageToken}`;
+          console.log(`[API POST /admin/endpoints/${endpointId}/models] Fetching Google models (page ${page}, token: ${nextPageToken.substring(0, 10)}...)...`);
+        }
+        
+        try {
+            const response = await fetch(modelsUrl, { method: 'GET' });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                console.error(`[API POST /admin/endpoints/${endpointId}/models] Error fetching Google models (page ${page}, status ${response.status}):`, errorBody);
+                // Stop fetching on error, but maybe keep models from previous pages?
+                nextPageToken = undefined; // Ensure loop terminates
+                 // Decide whether to throw or just return partial results
+                 // Throwing for now to indicate incomplete fetch
+                 throw new Error(`Failed to fetch Google models page ${page}: ${response.status} ${response.statusText}`);
+            }
+            
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                 const errorBody = await response.text();
+                 console.error(`[API POST /admin/endpoints/${endpointId}/models] Google endpoint returned non-JSON (page ${page}): ${contentType}`);
+                 nextPageToken = undefined; // Ensure loop terminates
+                 throw new Error(`Google endpoint returned non-JSON response on page ${page}`);
+            }
+            
+            let modelsResponse: GoogleModelsListResponse;
+            try {
+                modelsResponse = await response.json();
+            } catch (parseError) {
+                console.error(`[API POST /admin/endpoints/${endpointId}/models] Failed to parse Google JSON response (page ${page}):`, parseError);
+                nextPageToken = undefined; // Ensure loop terminates
+                throw new Error(`Failed to parse Google endpoint response on page ${page}`);
+            }
+
+            if (!modelsResponse || !Array.isArray(modelsResponse.models)) {
+                 console.error(`[API POST /admin/endpoints/${endpointId}/models] Unexpected response format from Google models endpoint (page ${page}):`, modelsResponse);
+                 nextPageToken = undefined; // Ensure loop terminates
+                 throw new Error(`Invalid response format received from Google models endpoint on page ${page}`);
+            }
+
+            // Add fetched models to the list and get next token
+            allGoogleModels = allGoogleModels.concat(modelsResponse.models);
+            nextPageToken = modelsResponse.nextPageToken;
+            page++;
+
+        } catch (fetchPageError: any) {
+             console.error(`[API POST /admin/endpoints/${endpointId}/models] Error during Google model fetch (page ${page}):`, fetchPageError);
+             // Stop fetching on error
+             nextPageToken = undefined;
+             // Rethrow or handle as partial result
+             throw fetchPageError; 
+        }
+      } while (nextPageToken && page <= MAX_PAGES);
+
+      if (page > MAX_PAGES) {
+           console.warn(`[API POST /admin/endpoints/${endpointId}/models] Reached max pages (${MAX_PAGES}) fetching Google models.`);
+      }
+
+      // Map the combined Google response
+      fetchedModels = allGoogleModels.map(model => ({
+          model_id: model.name, 
+          model_name: model.displayName || model.name
+      }));
+      console.log(`[API POST /admin/endpoints/${endpointId}/models] Raw Google response data accumulated from ${page-1} pages.`); // Don't log potentially huge combined data
+      console.log(`[API POST /admin/endpoints/${endpointId}/models] Parsed ${fetchedModels.length} total models (Google).`);
+
+      // --- End Google AI Model Fetching Logic --- 
+
     } else {
-      console.log(`[API POST /admin/endpoints/${endpointId}/models] Endpoint type "${endpoint.type}" not supported for model fetching yet.`);
+      console.log(`[API POST /admin/endpoints/${endpointId}/models] Endpoint type "${endpoint.type}" not explicitly supported for model fetching yet.`);
       // For now, just return empty - later could support other types
-       return NextResponse.json({ message: 'Model fetching not supported for this endpoint type yet.', models_synced: 0 }, { status: 200 });
+       return NextResponse.json({ message: 'Model fetching not explicitly supported for this endpoint type yet.', models_synced: 0 }, { status: 200 });
     }
 
     // 3. Upsert Models into Database
@@ -159,10 +259,10 @@ export async function POST(
           endpoint_id: endpointId,
           model_id: model.model_id,
           model_name: model.model_name,
-          // 'enabled' defaults to false in the DB, no need to set it here
+          enabled: true // Enable newly fetched/found models by default
       }));
 
-      console.log(`[API POST /admin/endpoints/${endpointId}/models] Upserting ${modelsToUpsert.length} models into database...`);
+      console.log(`[API POST /admin/endpoints/${endpointId}/models] Upserting ${modelsToUpsert.length} models into database (enabled: true)...`);
 
       // Use upsert with ignoreDuplicates to avoid errors if a model already exists.
       // This effectively only inserts new models found.
@@ -170,8 +270,10 @@ export async function POST(
         .from('ai_endpoint_models')
         .upsert(modelsToUpsert, {
            onConflict: 'endpoint_id, model_id', // Specify unique constraint columns
-           ignoreDuplicates: true, // If conflict, do nothing (don't update existing)
-           // If you wanted to update existing (e.g., model_name), set ignoreDuplicates: false
+           // If conflict, DO update the enabled status and name (don't ignore duplicates completely)
+           ignoreDuplicates: false, 
+           // We want to update existing records if found, primarily to ensure they are marked enabled=true
+           // And update the name in case it changed upstream
            // count: 'exact' // Optional: Get precise count of rows affected
         });
 

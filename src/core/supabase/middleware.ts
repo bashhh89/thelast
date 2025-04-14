@@ -83,36 +83,55 @@ export async function updateSession(request: NextRequest) {
   // Define public routes
   const publicRoutes = ['/login', '/register', '/auth/callback']
   const isAdminRoute = pathname.startsWith('/admin')
+  const isApiRoute = pathname.startsWith('/api/') // Add check for API routes
 
   // Protect routes
-  if (isAdminRoute) {
+  if (isAdminRoute && !isApiRoute) { // <-- Apply redirects ONLY to non-API admin routes
     if (!user) {
-      // Not logged in, redirect to login
+      // Not logged in, redirect to login page
       const url = request.nextUrl.clone()
       url.pathname = '/login'
       url.searchParams.set('next', pathname) // Redirect back after login
+      console.log(`Middleware: No user found for admin page ${pathname}. Redirecting to login.`);
       return NextResponse.redirect(url)
     }
     if (!isAdmin) {
-      // Logged in but not admin, redirect to home (or show unauthorized page)
-      console.warn(`Middleware: Non-admin user (${user.id}) attempted to access admin route: ${pathname}`)
+      // Logged in but not admin, redirect to home page
+      console.warn(`Middleware: Non-admin user (${user.id}) attempted to access admin page: ${pathname}. Redirecting to home.`);
       const url = request.nextUrl.clone()
       url.pathname = '/' // Redirect to home
       return NextResponse.redirect(url)
     }
-    // If user is admin, allow access (proceed to session refresh)
-  } else if (!user && !publicRoutes.includes(pathname) && !pathname.startsWith('/_next') && !pathname.startsWith('/favicon.ico')) {
-    // Redirect to login
+    // If user is admin and it's a page, allow access (proceed to session refresh)
+  } else if (isApiRoute && isAdminRoute) {
+    // For ADMIN API routes, check auth but return JSON error instead of redirect
+    if (!user) {
+       console.log(`Middleware: No user found for admin API route ${pathname}. Returning 401.`);
+       return new NextResponse(JSON.stringify({ error: 'Unauthorized', message: 'Authentication required.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (!isAdmin) {
+       console.warn(`Middleware: Non-admin user (${user.id}) attempted to access admin API route: ${pathname}. Returning 403.`);
+       return new NextResponse(JSON.stringify({ error: 'Forbidden', message: 'Admin privileges required.' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    // If user is admin, allow API request to proceed to session refresh and handler
+
+  } else if (!isApiRoute && !user && !publicRoutes.includes(pathname) && !pathname.startsWith('/_next') && !pathname.startsWith('/favicon.ico')) {
+    // Redirect non-API, non-public routes to login if not logged in
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
+    console.log(`Middleware: No user found for protected page ${pathname}. Redirecting to login.`);
     return NextResponse.redirect(url)
-  } else if (user && publicRoutes.includes(pathname)) {
-    // Redirect to home
+  } else if (!isApiRoute && user && publicRoutes.includes(pathname)) {
+    // Redirect logged-in users away from public pages (like login)
     const url = request.nextUrl.clone()
     url.pathname = '/'
+    console.log(`Middleware: Logged-in user accessing public page ${pathname}. Redirecting to home.`);
     return NextResponse.redirect(url)
   }
+
+  // Allow other requests (e.g., public API routes, static files handled by matcher) to proceed
+  // Also allows authenticated, authorized requests for pages and API routes to proceed here
 
   // Refresh session - essential for Server Components
   // NOTE: Must happen *after* getUser and route protection checks

@@ -32,7 +32,7 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
   modelError: null,
 
   fetchModels: async () => {
-    set({ isLoadingModels: true, modelError: null }); 
+    set({ isLoadingModels: true, modelError: null });
     let fetchedSelectableModels: SelectableModel[] = [];
 
     try {
@@ -114,6 +114,6 @@ export const useModelStore = create<ModelStoreState>((set, get) => ({
 
   getModelById: (id) => {
      if (!id) return null;
-     return get().allModels.find(m => m.id === id) || null; 
+     return get().allModels.find(m => m.id === id) || null;
   }
 })); 
