@@ -64,99 +64,99 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => {
   return {
     sessions: savedSessions,
     currentWorkspaceId: savedWorkspaceId,
-    isLoading: false,
-    error: null,
+  isLoading: false,
+  error: null,
     isWebSearchMode: savedWebSearchMode, 
-    
-    // Selection state initialization
-    selectedSessionIds: new Set<string>(),
 
-    fetchSessionsForWorkspace: async (workspaceId: string) => {
-      // Avoid refetching if already loaded for this workspace
-      if (get().currentWorkspaceId === workspaceId && !get().error) {
-        // Potentially add logic here to check if a refresh is needed based on time
-        // For now, just return if already loaded
-        // set({ isLoading: false }); // Ensure loading is false if returning early
-        // return;
-      }
-      set({ isLoading: true, error: null, sessions: [], currentWorkspaceId: workspaceId }); // Clear old sessions
+  // Selection state initialization
+  selectedSessionIds: new Set<string>(),
+
+  fetchSessionsForWorkspace: async (workspaceId: string) => {
+    // Avoid refetching if already loaded for this workspace
+    if (get().currentWorkspaceId === workspaceId && !get().error) {
+      // Potentially add logic here to check if a refresh is needed based on time
+      // For now, just return if already loaded
+      // set({ isLoading: false }); // Ensure loading is false if returning early
+      // return;
+    }
+    set({ isLoading: true, error: null, sessions: [], currentWorkspaceId: workspaceId }); // Clear old sessions
       saveToLocalStorage('current-workspace-id', workspaceId);
 
-      try {
-        const { data, error } = await apiFetchChatSessions(workspaceId);
-        if (error) throw error;
-        set({ sessions: data || [], isLoading: false });
+    try {
+      const { data, error } = await apiFetchChatSessions(workspaceId);
+      if (error) throw error;
+      set({ sessions: data || [], isLoading: false });
         saveToLocalStorage('chat-sessions', data || []);
-      } catch (err: any) {
-        // Simpler error logging
-        const errorMessage = err?.message || "Failed to fetch sessions";
-        console.error(`Error fetching sessions in store: ${errorMessage}`, err);
-        set({ error: errorMessage, isLoading: false });
-      }
-    },
+    } catch (err: any) {
+      // Simpler error logging
+      const errorMessage = err?.message || "Failed to fetch sessions";
+      console.error(`Error fetching sessions in store: ${errorMessage}`, err);
+      set({ error: errorMessage, isLoading: false });
+    }
+  },
 
-    createSession: async (workspaceId: string, userId: string, projectId?: string, title?: string): Promise<ChatSession | null> => {
-      set({ isLoading: true, error: null });
-      try {
-        // Construct session data, manually ensuring type includes project_id
-        const sessionData: {
-          workspace_id: string;
-          user_id: string;
-          title?: string | null;
-          project_id?: string | null; // Explicitly add project_id here
-        } = {
-          workspace_id: workspaceId,
-          user_id: userId,
-          title: title || 'New Chat', // Default title
-          project_id: projectId || null, // Add projectId or null
-        };
+  createSession: async (workspaceId: string, userId: string, projectId?: string, title?: string): Promise<ChatSession | null> => {
+    set({ isLoading: true, error: null });
+    try {
+      // Construct session data, manually ensuring type includes project_id
+      const sessionData: {
+        workspace_id: string;
+        user_id: string;
+        title?: string | null;
+        project_id?: string | null; // Explicitly add project_id here
+      } = {
+        workspace_id: workspaceId,
+        user_id: userId,
+        title: title || 'New Chat', // Default title
+        project_id: projectId || null, // Add projectId or null
+      };
         
-        // Now call the API service which expects the correctly typed ChatSessionCreateData
-        const { data, error } = await apiCreateChatSession(sessionData);
-        if (error) throw error;
-        if (data) {
-          get().addSessionToList(data);
-          set({ isLoading: false });
-          return data; // Return the created session
-        } else {
-          throw new Error("No data returned after creating chat session.");
-        }
-      } catch (err: any) {
-        // Super Verbose Error Logging
-        console.error("!!! RAW ERROR in chat-session-store createSession:", err);
-        console.error("!!! typeof err:", typeof err);
-        console.error("!!! err.message:", err?.message);
-        console.error("!!! err.details:", err?.details);
-        console.error("!!! err.hint:", err?.hint);
-        console.error("!!! err.code:", err?.code);
-        console.error("!!! JSON.stringify(err):", JSON.stringify(err)); // Attempt to stringify
-        const errorMessage = err?.message || "Failed to create chat session (Unknown Error)";
-        set({ error: errorMessage, isLoading: false });
-        return null;
+      // Now call the API service which expects the correctly typed ChatSessionCreateData
+      const { data, error } = await apiCreateChatSession(sessionData);
+      if (error) throw error;
+      if (data) {
+        get().addSessionToList(data);
+        set({ isLoading: false });
+        return data; // Return the created session
+      } else {
+        throw new Error("No data returned after creating chat session.");
       }
-    },
+    } catch (err: any) {
+      // Super Verbose Error Logging
+      console.error("!!! RAW ERROR in chat-session-store createSession:", err);
+      console.error("!!! typeof err:", typeof err);
+      console.error("!!! err.message:", err?.message);
+      console.error("!!! err.details:", err?.details);
+      console.error("!!! err.hint:", err?.hint);
+      console.error("!!! err.code:", err?.code);
+      console.error("!!! JSON.stringify(err):", JSON.stringify(err)); // Attempt to stringify
+      const errorMessage = err?.message || "Failed to create chat session (Unknown Error)";
+      set({ error: errorMessage, isLoading: false });
+      return null;
+    }
+  },
 
-    addSessionToList: (session: ChatSession) => {
+  addSessionToList: (session: ChatSession) => {
       const updatedSessions = [session, ...get().sessions.filter(s => s.id !== session.id)];
       set({ sessions: updatedSessions });
       saveToLocalStorage('chat-sessions', updatedSessions);
-    },
+  },
 
-    clearSessions: () => {
-      set({ sessions: [], currentWorkspaceId: null, isLoading: false, error: null });
+  clearSessions: () => {
+     set({ sessions: [], currentWorkspaceId: null, isLoading: false, error: null });
       saveToLocalStorage('chat-sessions', []);
       saveToLocalStorage('current-workspace-id', null);
-    },
+  },
 
-    deleteSession: async (sessionId: string) => {
-      const currentSessions = get().sessions;
-      // Optimistically remove from UI
+  deleteSession: async (sessionId: string) => {
+    const currentSessions = get().sessions;
+    // Optimistically remove from UI
       const updatedSessions = currentSessions.filter(s => s.id !== sessionId);
-      set((state) => ({ 
+    set((state) => ({ 
         sessions: updatedSessions,
-        // Also remove from selection if it was selected
-        selectedSessionIds: new Set([...state.selectedSessionIds].filter(id => id !== sessionId))
-      }));
+      // Also remove from selection if it was selected
+      selectedSessionIds: new Set([...state.selectedSessionIds].filter(id => id !== sessionId))
+    }));
       saveToLocalStorage('chat-sessions', updatedSessions);
 
       try {
@@ -167,7 +167,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => {
           .delete()
           .eq('id', sessionId);
           
-        if (error) {
+      if (error) {
           console.error(`Error deleting chat session ${sessionId} directly:`, error);
           // Don't throw, continue with UI update even if DB fails
         }
@@ -180,103 +180,103 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => {
           console.error(`Error removing localStorage for session ${sessionId}:`, e);
         }
         
-        // On success, session already removed optimistically
-        set({ isLoading: false, error: null });
+      // On success, session already removed optimistically
+      set({ isLoading: false, error: null });
 
-      } catch (err: any) {
-        console.error(`Raw error caught during session deletion ${sessionId}:`, err);
-        // Revert optimistic update on error
-        set({ sessions: currentSessions, error: err.message || "Failed to delete session", isLoading: false });
+    } catch (err: any) {
+      console.error(`Raw error caught during session deletion ${sessionId}:`, err);
+      // Revert optimistic update on error
+      set({ sessions: currentSessions, error: err.message || "Failed to delete session", isLoading: false });
         saveToLocalStorage('chat-sessions', currentSessions);
-      }
-    },
+    }
+  },
 
-    updateSessionTitle: async (sessionId: string, newTitle: string) => {
-      const trimmedTitle = newTitle.trim();
-      if (!trimmedTitle) return; // Prevent empty titles
+  updateSessionTitle: async (sessionId: string, newTitle: string) => {
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) return; // Prevent empty titles
 
-      const currentSessions = get().sessions;
-      const originalSession = currentSessions.find(s => s.id === sessionId);
-      if (!originalSession || originalSession.title === trimmedTitle) return; // No change needed
+    const currentSessions = get().sessions;
+    const originalSession = currentSessions.find(s => s.id === sessionId);
+    if (!originalSession || originalSession.title === trimmedTitle) return; // No change needed
 
-      // Optimistic update
+    // Optimistic update
       const updatedSessions = currentSessions.map(s => 
         s.id === sessionId ? { ...s, title: trimmedTitle } : s
       );
       
       set({
         sessions: updatedSessions,
-        isLoading: true,
-        error: null
+      isLoading: true,
+      error: null
       });
       saveToLocalStorage('chat-sessions', updatedSessions);
 
-      try {
-        // Call the API service function
-        const { error } = await updateSessionApi(sessionId, { title: trimmedTitle });
-        if (error) {
-          console.error(`Error updating chat session ${sessionId} title via API:`, error);
-          throw new Error(error); // Throw error string
-        }
-        // On success, optimistic update is correct
-        set({ isLoading: false, error: null });
-
-      } catch (err: any) {
-        console.error(`Raw error caught during session title update ${sessionId}:`, err);
-        // Revert on error
-        set({ 
-          sessions: currentSessions, 
-          error: err.message || "Failed to update title", 
-          isLoading: false 
-        });
-        saveToLocalStorage('chat-sessions', currentSessions);
+    try {
+      // Call the API service function
+      const { error } = await updateSessionApi(sessionId, { title: trimmedTitle });
+      if (error) {
+        console.error(`Error updating chat session ${sessionId} title via API:`, error);
+        throw new Error(error); // Throw error string
       }
-    },
+      // On success, optimistic update is correct
+      set({ isLoading: false, error: null });
 
-    toggleWebSearchMode: () => {
+    } catch (err: any) {
+      console.error(`Raw error caught during session title update ${sessionId}:`, err);
+      // Revert on error
+      set({ 
+        sessions: currentSessions, 
+        error: err.message || "Failed to update title", 
+        isLoading: false 
+      });
+        saveToLocalStorage('chat-sessions', currentSessions);
+    }
+  },
+
+  toggleWebSearchMode: () => {
       const newMode = !get().isWebSearchMode;
       set({ isWebSearchMode: newMode });
       saveToLocalStorage('web-search-mode', newMode);
       console.log("Web Search Mode toggled to:", newMode);
-    },
+  },
 
-    // Selection actions
-    toggleSessionSelection: (sessionId: string) => {
-      set((state) => {
-        const newSelectedIds = new Set(state.selectedSessionIds);
-        if (newSelectedIds.has(sessionId)) {
-          newSelectedIds.delete(sessionId);
-        } else {
-          newSelectedIds.add(sessionId);
-        }
-        return { selectedSessionIds: newSelectedIds };
-      });
-    },
+  // Selection actions
+  toggleSessionSelection: (sessionId: string) => {
+    set((state) => {
+      const newSelectedIds = new Set(state.selectedSessionIds);
+      if (newSelectedIds.has(sessionId)) {
+        newSelectedIds.delete(sessionId);
+      } else {
+        newSelectedIds.add(sessionId);
+      }
+      return { selectedSessionIds: newSelectedIds };
+    });
+  },
 
-    selectAllSessions: () => {
-      set((state) => {
-        const allIds = new Set(state.sessions.map(s => s.id));
-        return { selectedSessionIds: allIds };
-      });
-    },
+  selectAllSessions: () => {
+    set((state) => {
+      const allIds = new Set(state.sessions.map(s => s.id));
+      return { selectedSessionIds: allIds };
+    });
+  },
 
-    deselectAllSessions: () => {
-      set({ selectedSessionIds: new Set<string>() });
-    },
+  deselectAllSessions: () => {
+    set({ selectedSessionIds: new Set<string>() });
+  },
 
-    deleteSelectedSessions: async () => {
-      const selectedIds = Array.from(get().selectedSessionIds);
-      if (selectedIds.length === 0) return;
+  deleteSelectedSessions: async () => {
+    const selectedIds = Array.from(get().selectedSessionIds);
+    if (selectedIds.length === 0) return;
 
-      const currentSessions = get().sessions;
-      // Optimistically remove selected sessions from UI
+    const currentSessions = get().sessions;
+    // Optimistically remove selected sessions from UI
       const updatedSessions = currentSessions.filter(s => !get().selectedSessionIds.has(s.id));
       
       set({
         sessions: updatedSessions,
-        selectedSessionIds: new Set<string>(), // Clear selection
-        isLoading: true, // Set loading for the duration of the calls
-        error: null
+      selectedSessionIds: new Set<string>(), // Clear selection
+      isLoading: true, // Set loading for the duration of the calls
+      error: null
       });
       saveToLocalStorage('chat-sessions', updatedSessions);
 
@@ -301,19 +301,19 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => {
           } catch (e) {
             console.error(`Error removing localStorage for session ${sessionId}:`, e);
           }
-        }
-        
-        // All successful, clear loading/error
-        set({ isLoading: false, error: null });
+      } 
+      
+      // All successful, clear loading/error
+      set({ isLoading: false, error: null });
 
-      } catch (err: any) {
-        console.error("Error occurred during bulk session deletion:", err);
+    } catch (err: any) {
+      console.error("Error occurred during bulk session deletion:", err);
         // Set the error message
-        set({ 
-          error: err.message || "Failed to delete selected sessions", 
-          isLoading: false 
-        }); 
-      }
+      set({ 
+        error: err.message || "Failed to delete selected sessions", 
+        isLoading: false 
+      }); 
     }
+  }
   };
 }); 

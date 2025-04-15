@@ -35,14 +35,31 @@ export function MessageList({ messages, isLoading, error }: MessageListProps) {
     )
   }
   
-  // Show skeleton loader while messages are initially loading
+  // Show enhanced skeleton loader while messages are initially loading
   if (isLoading && messages.length === 0) {
     return (
       <div className="flex-1 space-y-4 p-4 overflow-y-auto">
-          <Skeleton className="h-16 w-3/4" />
-          <Skeleton className="h-16 w-3/4 ml-auto" />
-          <Skeleton className="h-10 w-1/2" />
-          <Skeleton className="h-16 w-3/4 ml-auto" />
+          <div className="flex items-start space-x-3">
+            <Skeleton className="h-8 w-8 rounded-full border" />
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-24" /> {/* Username/timestamp */}
+              <Skeleton className="h-16 w-3/4" /> {/* Message content */}
+            </div>
+          </div>
+          <div className="flex items-start space-x-3 justify-end">
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-24 ml-auto" /> {/* Username/timestamp */}
+              <Skeleton className="h-12 w-2/3 ml-auto" /> {/* Message content */}
+            </div>
+            <Skeleton className="h-8 w-8 rounded-full border" />
+          </div>
+          <div className="flex items-start space-x-3">
+            <Skeleton className="h-8 w-8 rounded-full border" />
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-20 w-5/6" />
+            </div>
+          </div>
       </div>
     )
   }
@@ -65,11 +82,18 @@ export function MessageList({ messages, isLoading, error }: MessageListProps) {
       {messages.map((message) => (
         <MessageItem key={message.id} message={message} />
       ))}
-       {/* Render additional skeleton if loading more messages or assistant response */} 
+      {/* Enhanced loading indicator for streaming/new messages */}
       {isLoading && messages.length > 0 && (
-         <div className="flex items-start space-x-3 py-4">
-            <Skeleton className="h-8 w-8 rounded-full border" /> 
-            <Skeleton className="h-10 w-1/2 rounded-lg px-4 py-2" />
+         <div className="flex items-start space-x-3 animate-pulse">
+            <div className="h-8 w-8 rounded-full border bg-accent flex items-center justify-center">
+              <div className="h-4 w-4 rounded-full bg-muted-foreground/20 animate-ping" />
+            </div>
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-10 w-1/2 rounded-lg px-4 py-2">
+                <span className="text-muted-foreground/50">AI is typing...</span>
+              </Skeleton>
+            </div>
          </div>
       )}
       <div ref={messagesEndRef} />

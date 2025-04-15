@@ -48,12 +48,30 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       setSelectedModel,
       fetchModels,
       isLoadingModels,
-      modelError
+    modelError,
+    allModels
   } = useModelStore()
+
   const { selectedPersona } = usePersonaStore()
   const { personas, selectedPersonaId, selectPersona, isLoading: personasLoading } = usePersonaStore()
 
   const inputAreaRef = React.useRef<ChatInputAreaRef>(null);
+
+  // Initialize models once on mount
+  React.useEffect(() => {
+    console.log("[ChatInterface] Initializing models");
+    fetchModels();
+  }, [fetchModels]);
+
+  // Handle model errors
+  React.useEffect(() => {
+    if (modelError) {
+      console.error("[ChatInterface] Model error:", modelError);
+      setError(modelError);
+    } else {
+      setError(null);
+    }
+  }, [modelError]);
 
   // Load messages from local storage when component mounts
   React.useEffect(() => {
@@ -71,30 +89,27 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
         // First check localStorage for cached messages
         const cachedMessages = localStorage.getItem(`chat_messages_${chatSessionId}`)
         if (cachedMessages) {
-          console.log("Loading messages from localStorage for session:", chatSessionId)
+          console.log("[ChatInterface] Loading cached messages for session:", chatSessionId)
           setMessages(JSON.parse(cachedMessages))
           setIsLoading(false)
           return
         }
         
         // If no cached messages, try to fetch from API
-        const { data, error: fetchError } = await fetchMessages(chatSessionId).catch(err => {
-          console.log("Error caught in fetch:", err);
-          return { data: null, error: err };
-        });
+        const { data, error: fetchError } = await fetchMessages(chatSessionId);
         
         if (fetchError) {
-          console.warn("Error loading messages - continuing with empty list:", fetchError);
-          setMessages([]);
-        } else {
-          const messagesData = data || [];
-          setMessages(messagesData);
-          // Cache in localStorage
-          localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messagesData))
+          console.warn("[ChatInterface] Error loading messages:", fetchError);
+          throw fetchError;
         }
+
+        const messagesData = data || [];
+        setMessages(messagesData);
+        // Cache in localStorage
+        localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messagesData))
       } catch (err: any) {
-        console.error("Error loading messages:", err);
-        // Don't set an error, just use an empty message list
+        console.error("[ChatInterface] Failed to load messages:", err);
+        setError(err.message || "Failed to load chat messages");
         setMessages([]);
       } finally {
         setIsLoading(false);
@@ -107,29 +122,58 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
   // Save messages to localStorage when they change
   React.useEffect(() => {
     if (chatSessionId && messages.length > 0) {
-      localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messages))
+      try {
+        localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(messages))
+      } catch (err) {
+        console.error("[ChatInterface] Failed to cache messages:", err);
+      }
     }
   }, [messages, chatSessionId])
 
-  React.useEffect(() => {
-    const { allModels: currentModels, selectedModel: currentSelection } = useModelStore.getState();
-    
-    if (isLoadingModels || modelError) return;
-    if (!currentSelection && currentModels.length > 0) { 
-        console.log("[ChatInterface] No model selected, relying on store default.");
-    }
-  }, [selectedModel, isLoadingModels, modelError]);
-
   const handleSendMessage = async (message: string) => {
-    if (!chatSessionId || !selectedModel?.id || !userId) {
-      setError("Cannot send message: Session, Selected Model, or User ID missing.")
-      console.error("Send Message Pre-check failed:", { chatSessionId, selectedModelId: selectedModel?.id, userId });
-      return
+    // **Enhanced Pre-checks**
+    if (!chatSessionId) {
+      setError("Cannot send message: No active chat session.");
+      console.error("[ChatInterface] Send failed: chatSessionId is null.");
+      return;
     }
-    const currentModel = selectedModel;
+    if (!userId) {
+      setError("Cannot send message: User not logged in.");
+      console.error("[ChatInterface] Send failed: userId is null.");
+      return;
+    }
+    if (isLoadingModels) {
+      setError("Cannot send message: AI models are still loading.");
+      console.warn("[ChatInterface] Send delayed: Models loading.");
+      return;
+    }
+    if (modelError) {
+      setError(`Cannot send message due to model loading error: ${modelError}`);
+      console.error("[ChatInterface] Send failed: Model error exists.", modelError);
+      return;
+    }
+    if (!selectedModel || !selectedModel.id || !selectedModel.endpointId) {
+      setError("Cannot send message: No valid AI model selected or model is incomplete.");
+      console.error("[ChatInterface] Send failed: selectedModel invalid.", selectedModel);
+      // Attempt to re-fetch or select default if possible? Or prompt user.
+      // For now, just block sending.
+      // fetchModels(); // Optionally try fetching again
+      return;
+    }
 
-    let initialAiMessage: ChatMessage | null = null; 
+    // **Use a stable reference to the model for the entire send operation**
+    const currentModel = { ...selectedModel }; // Shallow copy to prevent mid-send changes
+
+    let tempAiMessageId: number | null = null; // Use number or string consistent with ChatMessage ID type
+
+    try {
+      setIsSubmitting(true);
+      setIsStreaming(true);
+      setError(null);
+
+      // **Ensure consistent ID types (assuming number for Date.now)**
     const userMessageId = Date.now();
+      tempAiMessageId = userMessageId + 1; // Assign temporary ID here
 
     const userMessageData: ChatMessage = {
       id: userMessageId,
@@ -140,189 +184,262 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
       inserted_at: new Date().toISOString(),
       metadata: { 
         model_id: currentModel.id,
-        model_name: currentModel.name
-      }
-    }
+          model_name: currentModel.name,
+          provider_type: currentModel.providerType // Include provider type
+        }
+      };
 
-    try {
-      setIsSubmitting(true);
-      setIsStreaming(true);
-      setError(null);
-      
-      initialAiMessage = {
-        id: Date.now() + 1,
+      const initialAiMessageData: ChatMessage = {
+        id: tempAiMessageId, // Use the assigned temp ID
         session_id: chatSessionId,
-        user_id: userId,
-        content: "",
+        user_id: userId, // Or assign a system/bot ID if applicable
+        content: "", // Start empty
         role: 'assistant' as const,
         inserted_at: new Date().toISOString(),
         metadata: { 
             model_id: currentModel.id, 
-            model_name: currentModel.name 
+          model_name: currentModel.name,
+          provider_type: currentModel.providerType, // Include provider type
+          streaming: true, // Indicate streaming start
+          completed: false
         }
       };
       
-      // Add messages to UI immediately and save to localStorage
-      const updatedMessages = [...messages, userMessageData, initialAiMessage];
-      setMessages(updatedMessages);
-      localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(updatedMessages));
-      
-      const tempAiMessageId = initialAiMessage.id;
+      // Add messages to UI immediately
+      // Use functional update for setMessages to ensure we have the latest state
+      setMessages(prevMessages => {
+        const updated = [...prevMessages, userMessageData, initialAiMessageData];
+        // Update local storage immediately after setting state
+        try {
+            localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(updated));
+        } catch (e) {
+            console.error("[ChatInterface] Failed to cache optimistic messages:", e);
+        }
+        return updated;
+      });
 
-      // No database operations - just UI and localStorage
 
+      // **Prepare API request**
       const fetchUrl = '/api/generate/text';
+      const requestBody = {
+          prompt: message,
+          endpointId: currentModel.endpointId, // Ensure these are valid
+          modelId: currentModel.id,           // Ensure these are valid
+          systemPrompt: selectedPersona?.system_prompt || undefined, // Send undefined if null/empty
+          chatHistory: messages // Send the history *before* adding the new user/assistant messages
+              .filter(msg => msg.role === 'user' || msg.role === 'assistant') // Filter relevant roles
+              .map(({ role, content }) => ({ role, content })) // Map to expected format
+              .slice(-10) // Limit history length if needed
+      };
+
       const fetchOptions: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            prompt: message, 
-            endpointId: currentModel.endpointId,
-            modelId: currentModel.id,
-            systemPrompt: selectedPersona?.system_prompt,
-            chatHistory: messages
-                .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-                .map(({ role, content }) => ({ role, content }))
-        }),
+        body: JSON.stringify(requestBody),
       };
-      
-      console.log(`[ChatInterface] Sending payload to ${fetchUrl}:`, {
-          prompt: message,
+
+      console.log(`[ChatInterface] Sending request to ${fetchUrl}`, {
+        modelId: currentModel.id,
           endpointId: currentModel.endpointId,
-          modelId: currentModel.id,
-          systemPrompt: selectedPersona?.system_prompt ? 'present' : 'none',
-          historyLength: messages.filter(msg => msg.role === 'user' || msg.role === 'assistant').length
+        historyLength: requestBody.chatHistory.length,
+        hasSystemPrompt: !!requestBody.systemPrompt
       });
 
-      let aiContent = "";
+      // **Make API Call**
+      const response = await fetch(fetchUrl, fetchOptions);
+
+      console.log(`[ChatInterface] Response status: ${response.status}`);
+
+      if (!response.ok) {
+          let errorBody = 'Could not read error response body.';
+          try {
+              errorBody = await response.text(); // Try to get more details
+          } catch (e) { /* ignore */ }
+          throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}. Body: ${errorBody}`);
+      }
+
+      let finalAiContent = "";
       let toolArgs = "";
+      let isToolCall = false;
 
-      try {
-        const response = await fetch(fetchUrl, fetchOptions);
+      // **Handle Response (Streaming or Non-Streaming)**
+      // Decision based on backend header or model type (adjust as needed)
+      const isStreamingResponse = response.headers.get('Content-Type')?.includes('text/event-stream') ||
+                                    (currentModel.providerType !== 'custom' && currentModel.id !== 'searchgpt');
 
-        if (!response.ok) {
-          let errorPayload: any;
-          try { errorPayload = await response.json(); } catch { /* ignore */ }
-          const errorMsg = errorPayload?.error || `Backend API failed with status ${response.status}`;
-          console.error("Error from backend API route:", response.status, errorPayload);
-          throw new Error(errorMsg);
-        }
-        if (!response.body) throw new Error("Received empty response body from backend API");
-
-        let buffer = "";
-        let done = false;
-        const stream = response.body;
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-
-        while (!done) {
-          const { value, done: readerDone } = await reader.read();
-          done = readerDone;
-          if (value) {
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            let messageEndIndex;
-            while ((messageEndIndex = buffer.indexOf('\n\n')) !== -1) {
-              const messageText = buffer.substring(0, messageEndIndex);
-              buffer = buffer.substring(messageEndIndex + 2);
-              const lines = messageText.split('\n');
-              for (const line of lines) {
-                if (line.startsWith('data:')) {
-                  const dataStr = line.substring(5).trim();
-                  if (dataStr === "[DONE]") {
-                    console.log(`[${currentModel.name}] Received [DONE] marker.`);
-                    done = true;
-                    break;
-                  }
-                  if (dataStr) {
-                    if (dataStr.startsWith('{') && dataStr.endsWith('}')) {
-                      try {
-                        const parsedData = JSON.parse(dataStr);
-                        const deltaContent = parsedData.choices?.[0]?.delta?.content;
-                        if (typeof deltaContent === 'string' && deltaContent.length > 0) {
-                          aiContent += deltaContent;
-                        } else {
-                          const deltaToolCalls = parsedData.choices?.[0]?.delta?.tool_calls;
-                          if (deltaToolCalls && deltaToolCalls.length > 0 && deltaToolCalls[0]?.function?.arguments) {
-                             const argsChunk = deltaToolCalls[0].function.arguments;
-                             if (typeof argsChunk === 'string') {
-                                 toolArgs += argsChunk;
-                             }
-                          }
-                        }
-                      } catch (e) {
-                        console.warn(`[${currentModel.name}] Failed to parse JSON chunk:`, dataStr, e);
-                      }
-                    } else {
-                       console.warn(`[${currentModel.name}] Received non-JSON, non-[DONE] data line:`, dataStr);
-                    }
-                  }
-                }
-              }
-              if (done) break;
-            }
-
-            if (aiContent) {
-               setMessages(prev => prev.map(msg => 
-                 msg.id === tempAiMessageId ? { ...msg, content: aiContent } : msg
-               ));
-            }
-          }
-        }
-        console.log(`[${currentModel.name}] Stream processing finished.`);
-      } catch (apiError: any) {
-        console.error("Error with API call:", apiError);
-        // Just update the message with an error
+      if (!isStreamingResponse) {
+          console.log("[ChatInterface] Handling non-streaming response");
+        const text = await response.text();
+          finalAiContent = text.trim();
+        
+          // **Final Update for Non-Streaming**
         setMessages(prev => prev.map(msg => 
-          msg.id === initialAiMessage!.id 
-            ? { ...msg, content: `Sorry, I couldn't generate a response. Error: ${apiError.message || "Unknown error"}`, metadata: { ...(msg.metadata || {}), error: true } } 
+          msg.id === tempAiMessageId 
+            ? { 
+                ...msg, 
+                  content: finalAiContent,
+                metadata: { 
+                  ...msg.metadata,
+                  streaming: false,
+                  completed: true
+                }
+              } 
             : msg
         ));
-      }
-      
-      if (toolArgs) {
-          console.log(`[${currentModel.name}] FINAL accumulated tool arguments string:`, toolArgs);
-          
-          try {
-              // Parse the JSON arguments
-              const toolArgsData = JSON.parse(toolArgs);
-              console.log(`[${currentModel.name}] Parsed tool arguments:`, toolArgsData);
-              
-              // Handle the tool calls here as needed
-          } catch (e) {
-              console.error(`[${currentModel.name}] Failed to parse tool arguments:`, e);
-          }
-      }
 
-      // Update localStorage with updated AI message content
-      if (aiContent && initialAiMessage) {
-          try {
-              // Update the AI message with its content
-              const finalMessages = messages.map(msg => 
-                  msg.id === tempAiMessageId 
-                      ? { ...msg, content: aiContent } 
-                      : msg
-              );
-              localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(finalMessages));
-              console.log(`[${currentModel.name}] Updated AI message in localStorage`);
-          } catch (err) {
-              console.warn(`[${currentModel.name}] Failed to update AI message in localStorage:`, err);
+      } else {
+        console.log("[ChatInterface] Handling streaming response");
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("Response body is not readable for streaming");
+
+        const decoder = new TextDecoder();
+        let buffer = ""; // Buffer to hold incomplete lines
+        let accumulatedContent = ""; // Keep track of all content
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log("[ChatInterface] Stream finished. Total content accumulated:", accumulatedContent.length, "characters");
+            
+            // Always update the final content in state
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempAiMessageId 
+                ? { 
+                    ...msg, 
+                    content: accumulatedContent,
+                    metadata: { 
+                      ...msg.metadata,
+                      streaming: false,
+                      completed: true
+                    }
+                  } 
+                : msg
+            ));
+            break;
           }
-      }
+
+          // Decode new chunk and add to buffer
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          // Process complete SSE messages
+          const messages = buffer.split(/\n\n/).filter(Boolean);
+          
+          // Keep the last item if it doesn't end with \n\n
+          if (!buffer.endsWith('\n\n') && messages.length > 0) {
+            buffer = messages.pop() || "";
+          } else {
+            buffer = "";
+          }
+
+          for (const message of messages) {
+            if (!message.startsWith('data: ')) continue;
+            
+            const data = message.substring(6); // Remove 'data: ' prefix
+            
+            if (data === '[DONE]') {
+              console.log("[ChatInterface] Received [DONE] signal");
+              continue;
+            }
+
+            try {
+              console.log("[ChatInterface] Processing SSE message:", data.substring(0, 100) + (data.length > 100 ? "..." : ""));
+              
+              // Skip parsing attempts and just display the content directly
+              let newContent = "";
+              
+              // Handle [DONE] marker
+              if (data === '[DONE]') {
+                console.log("[ChatInterface] End of stream marker");
+                continue;
+              }
+              
+              // First try simple JSON string (most common case from our API)
+              if (data.startsWith('"') && data.endsWith('"')) {
+                try {
+                  newContent = JSON.parse(data);
+                  console.log("[ChatInterface] Parsed simple JSON string:", newContent.substring(0, 50) + (newContent.length > 50 ? "..." : ""));
+                } catch (e) {
+                  // If parsing fails, just use the raw data
+                  newContent = data;
+                  console.log("[ChatInterface] Using raw string data");
+                }
+              } 
+              // OpenAI format (fallback)
+              else if (data.includes("choices") && data.includes("delta")) {
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                    newContent = parsed.choices[0].delta.content;
+                    console.log("[ChatInterface] Extracted from OpenAI format:", newContent);
+                  }
+                } catch (e) {
+                  // If parsing fails, use the raw data
+                  newContent = data;
+                  console.log("[ChatInterface] Using raw data (OpenAI format parse failed)");
+                }
+              }
+              // Use raw data as last resort
+              else {
+                newContent = data;
+                console.log("[ChatInterface] Using raw data (no format recognized)");
+              }
+              
+              if (newContent && typeof newContent === 'string') {
+                console.log("[ChatInterface] Adding to UI:", newContent.substring(0, 30) + (newContent.length > 30 ? "..." : ""));
+                accumulatedContent += newContent;
+                
+                // Update UI with new content
+                setMessages(prev => prev.map(msg => 
+                  msg.id === tempAiMessageId 
+                    ? { ...msg, content: accumulatedContent } 
+                    : msg
+                ));
+              }
+            } catch (e) {
+              console.error("[ChatInterface] Error processing SSE message:", e);
+            }
+          }
+        }
+      } // End else (streaming)
+
+      // Persist final state after all updates are done
+       setMessages(prevMessages => {
+         try {
+           localStorage.setItem(`chat_messages_${chatSessionId}`, JSON.stringify(prevMessages));
+         } catch (e) {
+           console.error("[ChatInterface] Failed to cache final messages:", e);
+         }
+         return prevMessages; // Return unchanged state just to trigger potential re-render if needed
+       });
+
+
     } catch (error: any) {
-      console.error("Error during message send/stream:", error);
+      console.error("[ChatInterface] Critical error during message send/stream:", error);
       setError(error.message || "Failed to get response from AI");
-      if (initialAiMessage) { 
+
+      // Update the temporary AI message to show the error
+      if (tempAiMessageId !== null) {
           setMessages(prev => prev.map(msg => 
-             msg.id === initialAiMessage!.id 
-               ? { ...msg, content: `Error: ${error.message}`, metadata: { ...(msg.metadata || {}), error: true } } 
+             msg.id === tempAiMessageId
+            ? { 
+                ...msg, 
+                content: `Error: ${error.message}`, 
+                metadata: { 
+                  ...(msg.metadata || {}), 
+                  error: true,
+                  streaming: false,
+                  completed: true
+                } 
+              } 
                : msg
           ));
       }
     } finally {
       setIsSubmitting(false);
-        setIsStreaming(false);
+      setIsStreaming(false); // Ensure streaming is set to false in finally
       inputAreaRef.current?.focus(); 
+      console.log("[ChatInterface] handleSendMessage finished.");
     }
   }
 
@@ -366,7 +483,7 @@ export function ChatInterface({ chatSessionId }: ChatInterfaceProps) {
           ref={inputAreaRef}
           onSubmit={handleSendMessage} 
           isLoading={isSubmitting || isStreaming} 
-          onGenerateAudio={handleGenerateAudio}
+          onGenerateAudio={handleGenerateAudio} 
         />
       </div>
     </div>

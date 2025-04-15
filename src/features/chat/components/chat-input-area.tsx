@@ -30,26 +30,47 @@ export const ChatInputArea = React.forwardRef<ChatInputAreaRef, ChatInputAreaPro
   const [inputValue, setInputValue] = React.useState("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const { isWebSearchEnabled, toggleWebSearch } = useSearchStore();
+  const focusTimeoutRef = React.useRef<NodeJS.Timeout>();
 
   // Effect to focus the textarea when isLoading becomes false
   React.useEffect(() => {
     if (!isLoading && textareaRef.current) {
-      // Use requestAnimationFrame for potentially smoother focus after state updates
-      requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        console.log("[ChatInputArea Focus Effect] Focused textarea because isLoading became false.");
-      });
+      // Clear any existing timeout
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+      }
+      
+      // Set a new timeout for focus
+      focusTimeoutRef.current = setTimeout(() => {
+        if (textareaRef.current && document.activeElement !== textareaRef.current) {
+          textareaRef.current.focus();
+          console.log("[ChatInputArea Focus Effect] Focused textarea after delay");
+        }
+      }, 100); // Small delay to ensure DOM updates are complete
     }
+    
+    // Cleanup timeout on unmount or when dependencies change
+    return () => {
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+      }
+    };
   }, [isLoading]);
 
   // Expose the focus method via useImperativeHandle
   React.useImperativeHandle(ref, () => ({
     focus: () => {
-      textareaRef.current?.focus();
+      if (focusTimeoutRef.current) {
+        clearTimeout(focusTimeoutRef.current);
+      }
+      focusTimeoutRef.current = setTimeout(() => {
+        if (textareaRef.current && document.activeElement !== textareaRef.current) {
+          textareaRef.current.focus();
+          console.log("[ChatInputArea Focus Effect] Manual focus called");
+        }
+      }, 100);
     },
-    getCurrentValue: () => {
-      return inputValue;
-    }
+    getCurrentValue: () => inputValue
   }));
 
   const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
